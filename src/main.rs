@@ -7,6 +7,7 @@ use std::io::{Write, BufReader, BufRead, Error};
 
 mod scanner;
 mod token;
+mod expr;
 use crate::scanner::scan_tokens;
 
 fn main() {

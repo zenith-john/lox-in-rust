@@ -32,7 +32,7 @@ pub fn scan_tokens(string: &String, line: &mut i32) -> Vec<Token> {
         start = current;
         current = scan_token(&string, start, &mut tokens, line);
     }
-    tokens.push(Token{ttype: TokenType::EOF, lexeme: String::new(), line: *line});
+    tokens.push(Token{ttype: TokenType::EOF, lexeme: None, line: *line});
     return tokens;
 }
 
@@ -41,50 +41,50 @@ fn scan_token(string: &String, pos: usize, tokens: &mut Vec<Token>, line: &mut i
     let c:char = string.chars().nth(pos).expect("End of string.");
     let mut end: usize = pos;
     match c {
-        '(' => tokens.push(Token{ttype: TokenType::LEFT_PAREN, lexeme: String::from("("), line: *line}),
-        ')' => tokens.push(Token{ttype: TokenType::RIGHT_PAREN, lexeme: String::from(")"), line: *line}),
-        '{' => tokens.push(Token{ttype: TokenType::LEFT_BRACE, lexeme: String::from("{"), line: *line}),
-        '}' => tokens.push(Token{ttype: TokenType::RIGHT_BRACE, lexeme: String::from("}"), line: *line}),
-        ',' => tokens.push(Token{ttype: TokenType::COMMA, lexeme: String::from(","), line: *line}),
-        '.' => tokens.push(Token{ttype: TokenType::DOT, lexeme: String::from("."), line: *line}),
-        '-' => tokens.push(Token{ttype: TokenType::MINUS, lexeme: String::from("-"), line: *line}),
-        '+' => tokens.push(Token{ttype: TokenType::PLUS, lexeme: String::from("+"), line: *line}),
-        ';' => tokens.push(Token{ttype: TokenType::SEMICOLON, lexeme: String::from(";"), line: *line}),
-        '*' => tokens.push(Token{ttype: TokenType::STAR, lexeme: String::from("*"), line: *line}),
+        '(' => tokens.push(Token{ttype: TokenType::LEFT_PAREN, lexeme: None, line: *line}),
+        ')' => tokens.push(Token{ttype: TokenType::RIGHT_PAREN, lexeme: None, line: *line}),
+        '{' => tokens.push(Token{ttype: TokenType::LEFT_BRACE, lexeme: None, line: *line}),
+        '}' => tokens.push(Token{ttype: TokenType::RIGHT_BRACE, lexeme: None, line: *line}),
+        ',' => tokens.push(Token{ttype: TokenType::COMMA, lexeme: None, line: *line}),
+        '.' => tokens.push(Token{ttype: TokenType::DOT, lexeme: None, line: *line}),
+        '-' => tokens.push(Token{ttype: TokenType::MINUS, lexeme: None, line: *line}),
+        '+' => tokens.push(Token{ttype: TokenType::PLUS, lexeme: None, line: *line}),
+        ';' => tokens.push(Token{ttype: TokenType::SEMICOLON, lexeme: None, line: *line}),
+        '*' => tokens.push(Token{ttype: TokenType::STAR, lexeme: None, line: *line}),
         '!' => {
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '=' {
-                tokens.push(Token{ttype: TokenType::BANG_EQUAL, lexeme: String::from("!="), line: *line});
+                tokens.push(Token{ttype: TokenType::BANG_EQUAL, lexeme: None, line: *line});
                 end = pos + 1
             }
             else {
-                tokens.push(Token{ttype: TokenType::BANG, lexeme: String::from("!"), line: *line});
+                tokens.push(Token{ttype: TokenType::BANG, lexeme: None, line: *line});
             }
         },
         '=' => {
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '=' {
-                tokens.push(Token{ttype: TokenType::EQUAL_EQUAL, lexeme: String::from("=="), line: *line});
+                tokens.push(Token{ttype: TokenType::EQUAL_EQUAL, lexeme: None, line: *line});
                 end = pos + 1
             }
             else {
-                tokens.push(Token{ttype: TokenType::EQUAL, lexeme: String::from("="), line: *line});
+                tokens.push(Token{ttype: TokenType::EQUAL, lexeme: None, line: *line});
             }
         }
         '<' => {
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '=' {
-                tokens.push(Token{ttype: TokenType::LESS_EQUAL, lexeme: String::from("<="), line: *line});
+                tokens.push(Token{ttype: TokenType::LESS_EQUAL, lexeme: None, line: *line});
                 end = pos + 1
             }
             else {
-                tokens.push(Token{ttype: TokenType::LESS, lexeme: String::from("<"), line: *line});
+                tokens.push(Token{ttype: TokenType::LESS, lexeme: None, line: *line});
             }
         }
         '>' => {
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '=' {
-                tokens.push(Token{ttype: TokenType::GREATER_EQUAL, lexeme: String::from(">="), line: *line});
+                tokens.push(Token{ttype: TokenType::GREATER_EQUAL, lexeme: None, line: *line});
                 end = pos + 1
             }
             else {
-                tokens.push(Token{ttype: TokenType::GREATER, lexeme: String::from(">"), line: *line});
+                tokens.push(Token{ttype: TokenType::GREATER, lexeme: None, line: *line});
             }
         }
         '/' => {
@@ -92,7 +92,7 @@ fn scan_token(string: &String, pos: usize, tokens: &mut Vec<Token>, line: &mut i
                 end = string.len();
             }
             else {
-                tokens.push(Token{ttype: TokenType::SLASH, lexeme: String::from("/"), line: *line})
+                tokens.push(Token{ttype: TokenType::SLASH, lexeme: None, line: *line})
             }
         }
         '"' => {
@@ -104,7 +104,7 @@ fn scan_token(string: &String, pos: usize, tokens: &mut Vec<Token>, line: &mut i
                 error(*line, "Unterminated string.".to_string(), &mut had_error);
             }
             else {
-                tokens.push(Token{ttype: TokenType::STRING, lexeme: string[pos+1..end].to_string(), line: *line})
+                tokens.push(Token{ttype: TokenType::STRING, lexeme: Some(Box::new(string[pos+1..end].to_string())), line: *line})
             }
         }
         ' ' | '\t' | '\r' => {},
@@ -121,7 +121,7 @@ fn scan_token(string: &String, pos: usize, tokens: &mut Vec<Token>, line: &mut i
                         end = end + 1;
                     }
                 }
-            tokens.push(Token{ttype: TokenType::NUMBER, lexeme: string[pos..end].to_string(), line: *line})
+            tokens.push(Token{ttype: TokenType::NUMBER, lexeme: Some(Box::new(string[pos..end].parse::<f64>().unwrap())), line: *line})
         },
         'a'..='z' | 'A'..='Z' => {
             end = pos + 1;
@@ -133,7 +133,7 @@ fn scan_token(string: &String, pos: usize, tokens: &mut Vec<Token>, line: &mut i
                 Some(i) => i.clone(),
                 None => TokenType::IDENTIFIER
             };
-            tokens.push(Token{ttype: ttype, lexeme: text, line: *line});
+            tokens.push(Token{ttype: ttype, lexeme: Some(Box::new(text)), line: *line});
         }
         _ =>  {
             error(*line, "Unexpected character".to_string(), &mut had_error);
