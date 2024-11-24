@@ -1,14 +1,25 @@
-use crate::token::{Token,TokenType};
-use std::any::{Any,TypeId};
-use std::ops::Deref;
+use crate::token::Token;
+use std::any::Any;
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Debug)]
-enum Expr {
-    Binary{left: Box<Expr>, operator: Token, right: Box<Expr>},
-    Grouping{expression: Box<Expr>},
-    Literal{value: Box<dyn Any>},
-    Unary{operator: Token, right: Box<Expr>},
+pub enum Expr {
+    Binary {
+        left: Box<Expr>,
+        operator: Token,
+        right: Box<Expr>,
+    },
+    Grouping {
+        expression: Box<Expr>,
+    },
+    Literal {
+        value: Box<dyn Any>,
+    },
+    Unary {
+        operator: Token,
+        right: Box<Expr>,
+    },
 }
 
 fn any_to_string(value: &dyn Any) -> String {
@@ -24,10 +35,14 @@ fn any_to_string(value: &dyn Any) -> String {
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Expr::Binary{left, operator, right} => write!(f, "({:?} {} {})", operator, left, right),
-            Expr::Grouping{expression} =>  write!(f, "({})", expression),
-            Expr::Literal{value} => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
-            Expr::Unary{operator, right} => write!(f, "({:?} {})", operator, right)
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => write!(f, "({:?} {} {})", operator, left, right),
+            Expr::Grouping { expression } => write!(f, "({})", expression),
+            Expr::Literal { value } => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
+            Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
         }
     }
 }
@@ -44,13 +59,27 @@ mod tests {
 
     #[test]
     fn print_expr() {
-        let test_expr: Expr = Expr::Binary{
-            left: Box::new(Expr::Literal{value: Box::new(12.1)}),
-            operator: Token{ttype: TokenType::BANG_EQUAL, lexeme: None, line: 0},
-            right: Box::new(Expr::Unary{
-                operator: Token{ttype: TokenType::MINUS, lexeme: None, line: 0},
-                right: Box::new(Expr::Grouping{expression: Box::new(Expr::Literal{value: Box::new("12.1".to_string())})})
-            })
+        let test_expr: Expr = Expr::Binary {
+            left: Box::new(Expr::Literal {
+                value: Box::new(12.1),
+            }),
+            operator: Token {
+                ttype: TokenType::BANG_EQUAL,
+                lexeme: None,
+                line: 0,
+            },
+            right: Box::new(Expr::Unary {
+                operator: Token {
+                    ttype: TokenType::MINUS,
+                    lexeme: None,
+                    line: 0,
+                },
+                right: Box::new(Expr::Grouping {
+                    expression: Box::new(Expr::Literal {
+                        value: Box::new("12.1".to_string()),
+                    }),
+                }),
+            }),
         };
         println!("{}", test_expr);
     }

@@ -1,13 +1,15 @@
 extern crate lazy_static;
 use std::env;
-use std::process;
 use std::fs::File;
 use std::io;
-use std::io::{Write, BufReader, BufRead, Error};
+use std::io::{BufRead, BufReader, Error};
+use std::process;
 
+mod expr;
+mod parser;
 mod scanner;
 mod token;
-mod expr;
+use crate::parser::parser;
 use crate::scanner::scan_tokens;
 
 fn main() {
@@ -15,11 +17,9 @@ fn main() {
     if args.len() > 2 {
         println!("Usage: lox [script]");
         process::exit(0x0040);
-    }
-    else if args.len() == 2 {
+    } else if args.len() == 2 {
         let _ = run_file(&args[1]);
-    }
-    else {
+    } else {
         let _ = run_prompt();
     }
 }
@@ -55,12 +55,14 @@ fn run_prompt() -> Result<(), Error> {
 
 fn run(source: String, line_number: i32, had_error: &mut bool) {
     let mut line: i32 = line_number;
-    let tokens = scan_tokens(&source, &mut line);
+    let mut tokens = scan_tokens(&source, &mut line);
     if tokens.len() == 1 {
         error(line_number, String::from("Invalid input"), had_error);
     }
-    for token in tokens {
-        println!("{:?}", token);
+    let expr = parser(&mut tokens);
+    match expr {
+        Some(x) => println!("{}", x),
+        None => eprintln!("Can not analyze."),
     }
 }
 
