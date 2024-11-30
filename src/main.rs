@@ -1,4 +1,5 @@
 extern crate lazy_static;
+use std::any::Any;
 use std::env;
 use std::fs::File;
 use std::io;
@@ -6,9 +7,11 @@ use std::io::{BufRead, BufReader, Error};
 use std::process;
 
 mod expr;
+mod interpreter;
 mod parser;
 mod scanner;
 mod token;
+use crate::interpreter::evaluate;
 use crate::parser::parser;
 use crate::scanner::scan_tokens;
 
@@ -61,12 +64,31 @@ fn run(source: String, line_number: i32, had_error: &mut bool) {
     }
     let expr = parser(&mut tokens);
     match expr {
-        Some(x) => println!("{}", x),
-        None => eprintln!("Can not analyze."),
+        Some(x) => {
+            match evaluate(*x) {
+                Some(x) => println!("{}", result_to_string(x)),
+                None => eprintln!("Line {}: Runtime error", line),
+            };
+        }
+        None => eprintln!("Line {}: Semantics error", line),
     }
 }
 
 pub fn error(line: i32, message: String, had_error: &mut bool) {
     eprintln!("[Line {}] Error: {}", line, message);
     *had_error = true
+}
+
+fn result_to_string(result: Box<dyn Any>) -> String {
+    if let Some(value) = result.as_ref().downcast_ref::<f64>() {
+        return format!("{value}");
+    }
+    if let Some(value) = result.as_ref().downcast_ref::<String>() {
+        return format!("{value}");
+    }
+    if let Some(value) = result.as_ref().downcast_ref::<bool>() {
+        return format!("{value}");
+    } else {
+        return format!("{result:?}");
+    }
 }

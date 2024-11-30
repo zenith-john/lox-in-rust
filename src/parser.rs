@@ -3,14 +3,23 @@ use crate::token::{Token, TokenType};
 use std::collections::LinkedList;
 
 pub fn parser(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
-    return expression(tokens);
+    if let Some(expr) = expression(tokens) {
+        if !match_head(tokens, &[TokenType::EOF]) {
+            eprintln!("Remaining symbols.");
+            return None;
+        } else {
+            return Some(expr);
+        }
+    } else {
+        return None;
+    }
 }
 
 fn match_head(tokens: &LinkedList<Token>, slice: &[TokenType]) -> bool {
     let head = &tokens.front().unwrap().ttype;
-    if *head == TokenType::EOF {
-        return false;
-    }
+    // if *head == TokenType::EOF {
+    //     return false;
+    // }
     for t in slice.iter() {
         if *head == *t {
             return true;
@@ -175,6 +184,7 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
         }));
     }
     if match_head(tokens, &[TokenType::LEFT_PAREN]) {
+        tokens.pop_front();
         let opt = expression(tokens);
         let expr: Box<Expr>;
         match opt {
@@ -197,7 +207,7 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
 
 fn error(token: &Token, message: String) {
     if token.ttype == TokenType::EOF {
-        println!("{} at end. {}", token.line, message);
+        println!("Line {} unsolved at end. {}", token.line, message);
     } else {
         println!("{} at '{:?}' {}", token.line, token, message);
     }

@@ -198,35 +198,37 @@ fn scan_token(
         ' ' | '\t' | '\r' => {}
         '\n' => *line = *line + 1,
         '0'..='9' => {
-            end = pos + 1;
-            while end < string.len() && is_digit(string.chars().nth(end).expect("End of string")) {
-                end = end + 1;
-            }
-            if end + 1 < string.len()
-                && string.chars().nth(end).expect("End of string") == '.'
+            end = pos;
+            while end + 1 < string.len()
                 && is_digit(string.chars().nth(end + 1).expect("End of string"))
             {
+                end = end + 1;
+            }
+            if end + 2 < string.len()
+                && string.chars().nth(end + 1).expect("End of string") == '.'
+                && is_digit(string.chars().nth(end + 2).expect("End of string"))
+            {
                 end = end + 2;
-                while end < string.len()
-                    && is_digit(string.chars().nth(end).expect("End of string"))
+                while end + 1 < string.len()
+                    && is_digit(string.chars().nth(end + 1).expect("End of string"))
                 {
                     end = end + 1;
                 }
             }
             tokens.push_back(Token {
                 ttype: TokenType::NUMBER,
-                lexeme: Some(Box::new(string[pos..end].parse::<f64>().unwrap())),
+                lexeme: Some(Box::new(string[pos..end + 1].parse::<f64>().unwrap())),
                 line: *line,
             })
         }
         'a'..='z' | 'A'..='Z' => {
-            end = pos + 1;
-            while end < string.len()
-                && is_alpha_numeric(string.chars().nth(end).expect("End of string"))
+            end = pos;
+            while end + 1 < string.len()
+                && is_alpha_numeric(string.chars().nth(end + 1).expect("End of string"))
             {
                 end = end + 1;
             }
-            let text = string[pos..end].to_string();
+            let text = string[pos..end + 1].to_string();
             let ttype: TokenType = match keywords.get(&text) {
                 Some(i) => i.clone(),
                 None => TokenType::IDENTIFIER,
