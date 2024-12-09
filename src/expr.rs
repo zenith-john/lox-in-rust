@@ -20,9 +20,16 @@ pub enum Expr {
         operator: Token,
         right: Box<Expr>,
     },
+    Variable {
+        name: Token,
+    },
+    Assign {
+        name: Token,
+        value: Box<Expr>,
+    },
 }
 
-fn any_to_string(value: &dyn Any) -> String {
+pub fn any_to_string(value: &dyn Any) -> String {
     if let Some(val) = value.downcast_ref::<f64>() {
         format!("{}", val)
     } else if let Some(val) = value.downcast_ref::<String>() {
@@ -43,6 +50,8 @@ impl fmt::Display for Expr {
             Expr::Grouping { expression } => write!(f, "({})", expression),
             Expr::Literal { value } => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
+            Expr::Variable { name } => write!(f, "{:?}", name.lexeme),
+            Expr::Assign { name, value } => write!(f, "({:?} = {})", name.lexeme, value),
         }
     }
 }

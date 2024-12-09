@@ -1,19 +1,24 @@
 extern crate lazy_static;
-use std::any::Any;
+use std::cell::RefCell;
+use std::collections::LinkedList;
 use std::env;
 use std::fs::File;
 use std::io;
 use std::io::{BufRead, BufReader, Error};
 use std::process;
+use std::rc::Rc;
 
 mod expr;
 mod interpreter;
 mod parser;
 mod scanner;
+mod stmt;
 mod token;
-use crate::interpreter::evaluate;
+use crate::interpreter::interpret;
 use crate::parser::parser;
 use crate::scanner::scan_tokens;
+use crate::stmt::Environment;
+use crate::token::Token;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -30,12 +35,12 @@ fn main() {
 fn run_file(path: &String) -> Result<(), Error> {
     let input = File::open(path)?;
     let buffered = BufReader::new(input);
-    let mut had_error = false;
     let mut l: i32 = 1;
+    let env: Rc<RefCell<Environment>> = Rc::new(RefCell::new(Environment::new()));
     for line in buffered.lines() {
-        run(line?, l, &mut had_error);
-        if had_error {
-            process::exit(0x0041)
+        match run(line?, l, env.clone()) {
+            Err(_) => process::exit(0x0041),
+            Ok(_) => {}
         }
         l = l + 1;
     }
@@ -44,51 +49,44 @@ fn run_file(path: &String) -> Result<(), Error> {
 
 fn run_prompt() -> Result<(), Error> {
     let lines = io::stdin().lines();
-    let mut had_error = false;
     let mut l: i32 = 1;
+    let env: Rc<RefCell<Environment>> = Rc::new(RefCell::new(Environment::new()));
     for line in lines {
-        run(line.unwrap(), l, &mut had_error);
-        if had_error {
-            had_error = false;
+        match run(line.unwrap(), l, env.clone()) {
+            Err(_) => eprintln!("Error in evaluation"),
+            Ok(_) => {}
         }
         l = l + 1;
     }
     return Ok(());
 }
 
-fn run(source: String, line_number: i32, had_error: &mut bool) {
+fn run(source: String, line_number: i32, env: Rc<RefCell<Environment>>) -> Result<(), ()> {
     let mut line: i32 = line_number;
-    let mut tokens = scan_tokens(&source, &mut line);
-    if tokens.len() == 1 {
-        error(line_number, String::from("Invalid input"), had_error);
-    }
-    let expr = parser(&mut tokens);
-    match expr {
-        Some(x) => {
-            match evaluate(*x) {
-                Some(x) => println!("{}", result_to_string(x)),
-                None => eprintln!("Line {}: Runtime error", line),
-            };
+    let mut tokens: LinkedList<Token>;
+    match scan_tokens(&source, &mut line) {
+        None => {
+            eprintln!("Scanning Error.");
+            return Err(());
         }
-        None => eprintln!("Line {}: Semantics error", line),
+        Some(val) => tokens = val,
+    }
+    let result = parser(&mut tokens);
+    match result {
+        Some(stmts) => match interpret(stmts, env) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                eprintln!("Line {}: {}", line_number, e);
+                return Err(());
+            }
+        },
+        None => {
+            eprintln!("Line {}: Parser error", line_number);
+            return Err(());
+        }
     }
 }
 
-pub fn error(line: i32, message: String, had_error: &mut bool) {
+pub fn error(line: i32, message: String) {
     eprintln!("[Line {}] Error: {}", line, message);
-    *had_error = true
-}
-
-fn result_to_string(result: Box<dyn Any>) -> String {
-    if let Some(value) = result.as_ref().downcast_ref::<f64>() {
-        return format!("{value}");
-    }
-    if let Some(value) = result.as_ref().downcast_ref::<String>() {
-        return format!("{value}");
-    }
-    if let Some(value) = result.as_ref().downcast_ref::<bool>() {
-        return format!("{value}");
-    } else {
-        return format!("{result:?}");
-    }
 }

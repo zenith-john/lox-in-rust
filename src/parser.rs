@@ -1,17 +1,23 @@
 use crate::expr::Expr;
+use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
 use std::collections::LinkedList;
 
-pub fn parser(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
-    if let Some(expr) = expression(tokens) {
-        if !match_head(tokens, &[TokenType::EOF]) {
-            eprintln!("Remaining symbols.");
-            return None;
+pub fn parser(tokens: &mut LinkedList<Token>) -> Option<LinkedList<Box<Stmt>>> {
+    let mut statements: LinkedList<Box<Stmt>> = LinkedList::new();
+    let mut has_fail: bool = false;
+    while !match_head(tokens, &[TokenType::EOF]) {
+        if let Some(stmt) = declaration(tokens) {
+            statements.push_back(stmt);
         } else {
-            return Some(expr);
+            has_fail = true;
+            synchronize(tokens);
         }
-    } else {
+    }
+    if has_fail {
         return None;
+    } else {
+        return Some(statements);
     }
 }
 
@@ -27,6 +33,127 @@ fn match_head(tokens: &LinkedList<Token>, slice: &[TokenType]) -> bool {
     }
     return false;
 }
+
+fn declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::VAR]) {
+        tokens.pop_front();
+        return var_declaration(tokens);
+    } else {
+        return statement(tokens);
+    }
+}
+
+fn var_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::IDENTIFIER]) {
+        let name = tokens.pop_front().expect("Identifier Token.");
+        let mut initializer: Option<Box<Expr>> = None;
+        if match_head(tokens, &[TokenType::EQUAL]) {
+            tokens.pop_front();
+            if let Some(val) = expression(tokens) {
+                initializer = Some(val);
+            } else {
+                return None;
+            }
+        }
+        if match_head(tokens, &[TokenType::SEMICOLON]) {
+            tokens.pop_front();
+            return Some(Box::new(Stmt::Var {
+                name: name,
+                initializer: initializer,
+            }));
+        } else {
+            eprintln!("Expect ';' after expression.");
+            return None;
+        }
+    } else {
+        eprintln!("Expect an identifier.");
+        return None;
+    }
+}
+
+fn statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::PRINT]) {
+        return print_statement(tokens);
+    }
+    if match_head(tokens, &[TokenType::LEFT_BRACE]) {
+        return block(tokens);
+    }
+    return expression_statement(tokens);
+}
+
+fn block(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    let mut stmts: LinkedList<Box<Stmt>> = LinkedList::new();
+    tokens.pop_front();
+    while !match_head(tokens, &[TokenType::RIGHT_BRACE, TokenType::EOF]) {
+        match declaration(tokens) {
+            Some(val) => stmts.push_back(val),
+            None => return None,
+        }
+    }
+    if match_head(tokens, &[TokenType::RIGHT_BRACE]) {
+        tokens.pop_front();
+    } else {
+        eprintln!("No matching '}}'.");
+        return None;
+    }
+    return Some(Box::new(Stmt::Block { statements: stmts }));
+}
+
+fn print_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
+    if let Some(value) = assignment(tokens) {
+        if match_head(tokens, &[TokenType::SEMICOLON]) {
+            tokens.pop_front();
+            return Some(Box::new(Stmt::Print { expression: value }));
+        } else {
+            eprintln!("Expect ';' after expression.");
+            return None;
+        }
+    } else {
+        return None;
+    }
+}
+
+fn expression_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if let Some(value) = assignment(tokens) {
+        if match_head(tokens, &[TokenType::SEMICOLON]) {
+            tokens.pop_front();
+            return Some(Box::new(Stmt::Expression { expression: value }));
+        } else {
+            eprintln!("Expect ';' after expression.");
+            return None;
+        }
+    } else {
+        return None;
+    }
+}
+
+fn assignment(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+    let expr: Box<Expr>;
+    match expression(tokens) {
+        Some(x) => expr = x,
+        None => return None,
+    }
+    if match_head(tokens, &[TokenType::EQUAL]) {
+        tokens.pop_front();
+        match *expr {
+            Expr::Variable { name: tok } => {
+                let val: Box<Expr>;
+                match assignment(tokens) {
+                    Some(x) => val = x,
+                    None => return None,
+                }
+                return Some(Box::new(Expr::Assign {
+                    name: tok,
+                    value: val,
+                }));
+            }
+            _ => return None,
+        }
+    }
+    return Some(expr);
+}
+
 fn expression(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     let opt = comparison(tokens);
     let mut expr: Box<Expr>;
@@ -201,6 +328,10 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
         tokens.pop_front();
         return Some(Box::new(Expr::Grouping { expression: expr }));
     }
+    if match_head(tokens, &[TokenType::IDENTIFIER]) {
+        let token = tokens.pop_front().unwrap();
+        return Some(Box::new(Expr::Variable { name: token }));
+    }
     error(tokens.front().unwrap(), "No matching.".to_string());
     return None;
 }
@@ -214,9 +345,12 @@ fn error(token: &Token, message: String) {
 }
 
 fn synchronize(tokens: &mut LinkedList<Token>) {
-    while match_head(tokens, &[TokenType::EOF]) {
+    while !match_head(tokens, &[TokenType::EOF]) {
         match tokens.front().unwrap().ttype {
-            TokenType::SEMICOLON => return,
+            TokenType::SEMICOLON => {
+                tokens.pop_front();
+                return;
+            }
             TokenType::CLASS => return,
             TokenType::FUN => return,
             TokenType::VAR => return,

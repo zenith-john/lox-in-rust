@@ -1,25 +1,114 @@
 use crate::expr::Expr;
+use crate::stmt::{Environment, Stmt};
 use crate::token::{Token, TokenType};
 use std::any::Any;
+use std::cell::RefCell;
+use std::collections::LinkedList;
+use std::rc::Rc;
 
-pub fn evaluate(expr: Expr) -> Option<Box<dyn Any>> {
+pub fn result_to_string(result: Box<dyn Any>) -> String {
+    if let Some(value) = result.as_ref().downcast_ref::<f64>() {
+        return format!("{value}");
+    }
+    if let Some(value) = result.as_ref().downcast_ref::<String>() {
+        return format!("{value}");
+    }
+    if let Some(value) = result.as_ref().downcast_ref::<bool>() {
+        return format!("{value}");
+    } else {
+        return format!("{result:?}");
+    }
+}
+
+pub fn interpret(
+    stmts: LinkedList<Box<Stmt>>,
+    env: Rc<RefCell<Environment>>,
+) -> Result<(), &'static str> {
+    for stmt in stmts {
+        match *stmt {
+            Stmt::Expression { expression } => match evaluate(*expression, env.clone()) {
+                None => return Err("Runtime Error"),
+                _ => {}
+            },
+            Stmt::Print { expression } => {
+                if let Some(value) = evaluate(*expression, env.clone()) {
+                    println!("{}", result_to_string(value));
+                } else {
+                    return Err("Runtime Error");
+                }
+            }
+            Stmt::Var { name, initializer } => {
+                if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+                    match initializer {
+                        None => env.borrow_mut().define(key.clone(), Box::new(0)),
+                        Some(val) => {
+                            let result = evaluate(*val, env.clone());
+                            match result {
+                                Some(val) => env.borrow_mut().define(key.clone(), val),
+
+                                None => return Err("Runtime Error"),
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::Block { statements } => {
+                let new_env = Rc::new(RefCell::new(Environment::from(env.clone())));
+                match interpret(statements, new_env.clone()) {
+                    Ok(()) => {}
+                    Err(s) => return Err(s),
+                }
+            }
+        }
+    }
+    return Ok(());
+}
+
+pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Box<dyn Any>> {
     match expr {
         Expr::Binary {
             left,
             operator,
             right,
-        } => return binary_eval(*left, operator, *right),
+        } => return binary_eval(*left, operator, *right, env),
         Expr::Grouping { expression } => {
-            return evaluate(*expression);
+            return evaluate(*expression, env);
         }
         Expr::Literal { value } => return Some(value),
-        Expr::Unary { operator, right } => return unitary_eval(operator, *right),
+        Expr::Unary { operator, right } => return unitary_eval(operator, *right, env),
+        Expr::Variable { name } => {
+            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+                return match env.borrow_mut().get(key) {
+                    None => {
+                        eprintln!("Undefined Variable.");
+                        None
+                    }
+                    Some(val) => Some(val),
+                };
+            } else {
+                eprintln!("Invalid identifier.");
+                return None;
+            }
+        }
+        Expr::Assign { name, value } => {
+            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+                let val: Box<dyn Any>;
+                match evaluate(*value, env.clone()) {
+                    None => return None,
+                    Some(x) => val = x,
+                }
+                return env.borrow_mut().assign(key.clone(), val);
+            } else {
+                eprintln!("Invalid identifier.");
+                return None;
+            }
+        }
     }
 }
 
-fn unitary_eval(token: Token, expr: Expr) -> Option<Box<dyn Any>> {
+fn unitary_eval(token: Token, expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Box<dyn Any>> {
     let right;
-    match evaluate(expr) {
+    match evaluate(expr, env.clone()) {
         Some(x) => right = x,
         None => return None,
     }
@@ -56,14 +145,19 @@ fn unitary_eval(token: Token, expr: Expr) -> Option<Box<dyn Any>> {
     }
 }
 
-fn binary_eval(expr1: Expr, token: Token, expr2: Expr) -> Option<Box<dyn Any>> {
+fn binary_eval(
+    expr1: Expr,
+    token: Token,
+    expr2: Expr,
+    env: Rc<RefCell<Environment>>,
+) -> Option<Box<dyn Any>> {
     let left;
     let right;
-    match evaluate(expr1) {
+    match evaluate(expr1, env.clone()) {
         Some(x) => left = x,
         None => return None,
     }
-    match evaluate(expr2) {
+    match evaluate(expr2, env.clone()) {
         Some(x) => right = x,
         None => return None,
     }
