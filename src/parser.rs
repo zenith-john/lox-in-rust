@@ -2,6 +2,7 @@ use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
 use std::collections::LinkedList;
+use std::rc::Rc;
 
 pub fn parser(tokens: &mut LinkedList<Token>) -> Option<LinkedList<Box<Stmt>>> {
     let mut statements: LinkedList<Box<Stmt>> = LinkedList::new();
@@ -62,7 +63,7 @@ fn var_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
                 initializer: initializer,
             }));
         } else {
-            eprintln!("Expect ';' after expression.");
+            eprintln!("Expect ';' after expression : Declaration.");
             return None;
         }
     } else {
@@ -72,8 +73,14 @@ fn var_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
 }
 
 fn statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::IF]) {
+        return if_statement(tokens);
+    }
     if match_head(tokens, &[TokenType::PRINT]) {
         return print_statement(tokens);
+    }
+    if match_head(tokens, &[TokenType::WHILE]) {
+        return while_statement(tokens);
     }
     if match_head(tokens, &[TokenType::LEFT_BRACE]) {
         return block(tokens);
@@ -99,14 +106,81 @@ fn block(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     return Some(Box::new(Stmt::Block { statements: stmts }));
 }
 
+fn if_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
+    if !match_head(tokens, &[TokenType::LEFT_PAREN]) {
+        eprintln!("No ( after if.");
+        return None;
+    } else {
+        tokens.pop_front();
+    }
+    let cond: Box<Expr>;
+    match expression(tokens) {
+        Some(val) => cond = val,
+        None => return None,
+    }
+    if !match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+        eprintln!("No ) after if.");
+        return None;
+    } else {
+        tokens.pop_front();
+    }
+    let then_b: Box<Stmt>;
+    match statement(tokens) {
+        Some(val) => then_b = val,
+        None => return None,
+    }
+    let mut else_b: Option<Box<Stmt>> = None;
+    if match_head(tokens, &[TokenType::ELSE]) {
+        tokens.pop_front();
+        match statement(tokens) {
+            Some(val) => else_b = Some(val),
+            None => return None,
+        }
+    }
+    return Some(Box::new(Stmt::If {
+        condition: cond,
+        then_branch: then_b,
+        else_branch: else_b,
+    }));
+}
+
+fn while_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
+    if !match_head(tokens, &[TokenType::LEFT_PAREN]) {
+        eprintln!("No ( after if.");
+        return None;
+    } else {
+        tokens.pop_front();
+    }
+    let cond: Box<Expr>;
+    match expression(tokens) {
+        Some(val) => cond = val,
+        None => return None,
+    }
+    if !match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+        eprintln!("No ) after if.");
+        return None;
+    } else {
+        tokens.pop_front();
+    }
+
+    let stmt: Box<Stmt>;
+    match statement(tokens) {
+        None => return None,
+        Some(val) => stmt = val,
+    }
+    return Some(Box::new(Stmt::While { condition: cond, body: stmt}));
+}
+
 fn print_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     tokens.pop_front();
-    if let Some(value) = assignment(tokens) {
+    if let Some(value) = expression(tokens) {
         if match_head(tokens, &[TokenType::SEMICOLON]) {
             tokens.pop_front();
             return Some(Box::new(Stmt::Print { expression: value }));
         } else {
-            eprintln!("Expect ';' after expression.");
+            eprintln!("Expect ';' after expression : Print.");
             return None;
         }
     } else {
@@ -115,12 +189,12 @@ fn print_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
 }
 
 fn expression_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
-    if let Some(value) = assignment(tokens) {
+    if let Some(value) = expression(tokens) {
         if match_head(tokens, &[TokenType::SEMICOLON]) {
             tokens.pop_front();
             return Some(Box::new(Stmt::Expression { expression: value }));
         } else {
-            eprintln!("Expect ';' after expression.");
+            eprintln!("Expect ';' after expression : Expression.");
             return None;
         }
     } else {
@@ -128,9 +202,13 @@ fn expression_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     }
 }
 
+fn expression(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+    return assignment(tokens);
+}
+
 fn assignment(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     let expr: Box<Expr>;
-    match expression(tokens) {
+    match or(tokens) {
         Some(x) => expr = x,
         None => return None,
     }
@@ -154,7 +232,51 @@ fn assignment(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     return Some(expr);
 }
 
-fn expression(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+fn or(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+    let mut expr: Box<Expr>;
+    match and(tokens) {
+        Some(x) => expr = x,
+        None => return None,
+    }
+    while match_head(tokens, &[TokenType::OR]) {
+        let op = tokens.pop_front();
+        let rexpr: Box<Expr>;
+        match and(tokens) {
+            Some(x) => rexpr = x,
+            None => return None,
+        }
+        expr = Box::new(Expr::Logical {
+            left: expr,
+            operator: op?,
+            right: rexpr,
+        })
+    }
+    return Some(expr);
+}
+
+fn and(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+    let mut expr: Box<Expr>;
+    match equality(tokens) {
+        Some(x) => expr = x,
+        None => return None,
+    }
+    while match_head(tokens, &[TokenType::AND]) {
+        let op = tokens.pop_front();
+        let rexpr: Box<Expr>;
+        match equality(tokens) {
+            Some(x) => rexpr = x,
+            None => return None,
+        }
+        expr = Box::new(Expr::Logical {
+            left: expr,
+            operator: op?,
+            right: rexpr,
+        })
+    }
+    return Some(expr);
+}
+
+fn equality(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     let opt = comparison(tokens);
     let mut expr: Box<Expr>;
 
@@ -289,25 +411,25 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     if match_head(tokens, &[TokenType::FALSE]) {
         tokens.pop_front();
         return Some(Box::new(Expr::Literal {
-            value: Box::new(false),
+            value: Rc::new(false),
         }));
     }
     if match_head(tokens, &[TokenType::TRUE]) {
         tokens.pop_front();
         return Some(Box::new(Expr::Literal {
-            value: Box::new(true),
+            value: Rc::new(true),
         }));
     }
     if match_head(tokens, &[TokenType::NIL]) {
         tokens.pop_front();
         return Some(Box::new(Expr::Literal {
-            value: Box::new(Option::<bool>::None),
+            value: Rc::new(Option::<bool>::None),
         }));
     }
     if match_head(tokens, &[TokenType::NUMBER, TokenType::STRING]) {
         let token = tokens.pop_front().unwrap();
         return Some(Box::new(Expr::Literal {
-            value: token.lexeme.unwrap(),
+            value: token.lexeme.clone()?,
         }));
     }
     if match_head(tokens, &[TokenType::LEFT_PAREN]) {

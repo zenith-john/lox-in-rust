@@ -2,8 +2,9 @@ use crate::token::Token;
 use std::any::Any;
 use std::fmt;
 use std::ops::Deref;
+use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
@@ -14,7 +15,12 @@ pub enum Expr {
         expression: Box<Expr>,
     },
     Literal {
-        value: Box<dyn Any>,
+        value: Rc<dyn Any>,
+    },
+    Logical {
+        left: Box<Expr>,
+        operator: Token,
+        right: Box<Expr>,
     },
     Unary {
         operator: Token,
@@ -49,6 +55,7 @@ impl fmt::Display for Expr {
             } => write!(f, "({:?} {} {})", operator, left, right),
             Expr::Grouping { expression } => write!(f, "({})", expression),
             Expr::Literal { value } => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
+            Expr::Logical { left, operator, right } => write!(f, "({:?} {} {})", operator, left, right),
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
             Expr::Variable { name } => write!(f, "{:?}", name.lexeme),
             Expr::Assign { name, value } => write!(f, "({:?} = {})", name.lexeme, value),

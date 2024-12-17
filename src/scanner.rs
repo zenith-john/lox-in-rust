@@ -2,6 +2,7 @@ use crate::error;
 use crate::token::{Token, TokenType};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, LinkedList};
+use std::rc::Rc;
 
 lazy_static! {
     static ref keywords: HashMap<String, TokenType> = HashMap::from([
@@ -20,7 +21,7 @@ lazy_static! {
         ("this".to_string(), TokenType::THIS),
         ("true".to_string(), TokenType::TRUE),
         ("var".to_string(), TokenType::VAR),
-        ("WHILE".to_string(), TokenType::WHILE),
+        ("while".to_string(), TokenType::WHILE),
     ]);
 }
 
@@ -214,7 +215,7 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             } else {
                 token = Some(Token {
                     ttype: TokenType::STRING,
-                    lexeme: Some(Box::new(string[pos + 1..end].to_string())),
+                    lexeme: Some(Rc::new(string[pos + 1..end].to_string())),
                     line: *line,
                 })
             }
@@ -241,7 +242,7 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             }
             token = Some(Token {
                 ttype: TokenType::NUMBER,
-                lexeme: Some(Box::new(string[pos..end + 1].parse::<f64>().unwrap())),
+                lexeme: Some(Rc::new(string[pos..end + 1].parse::<f64>().unwrap())),
                 line: *line,
             })
         }
@@ -259,7 +260,7 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             };
             token = Some(Token {
                 ttype: ttype,
-                lexeme: Some(Box::new(text)),
+                lexeme: Some(Rc::new(text)),
                 line: *line,
             });
         }

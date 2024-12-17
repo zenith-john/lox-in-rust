@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::rc::Rc;
 
 #[expect(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq)]
@@ -52,9 +53,9 @@ pub enum TokenType {
     EOF,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub ttype: TokenType,
-    pub lexeme: Option<Box<dyn Any>>,
+    pub lexeme: Option<Rc<dyn Any>>,
     pub line: i32,
 }

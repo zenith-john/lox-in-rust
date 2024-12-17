@@ -5,9 +5,15 @@ use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Expression {
         expression: Box<Expr>,
+    },
+    If {
+        condition: Box<Expr>,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
     },
     Print {
         expression: Box<Expr>,
@@ -16,13 +22,17 @@ pub enum Stmt {
         name: Token,
         initializer: Option<Box<Expr>>,
     },
+    While {
+        condition: Box<Expr>,
+        body: Box<Stmt>,
+    },
     Block {
         statements: LinkedList<Box<Stmt>>,
     },
 }
 
 pub struct Environment {
-    values: HashMap<String, Box<dyn Any>>,
+    values: HashMap<String, Rc<dyn Any>>,
     enclosing: Option<Rc<RefCell<Environment>>>,
 }
 
@@ -41,11 +51,11 @@ impl Environment {
         }
     }
 
-    pub fn define(&mut self, key: String, value: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    pub fn define(&mut self, key: String, value: Rc<dyn Any>) -> Option<Rc<dyn Any>> {
         return self.values.insert(key, value);
     }
 
-    pub fn assign(&mut self, key: String, value: Box<dyn Any>) -> Option<Box<dyn Any>> {
+    pub fn assign(&mut self, key: String, value: Rc<dyn Any>) -> Option<Rc<dyn Any>> {
         if self.values.contains_key(&key) {
             return self.values.insert(key, value);
         } else {
@@ -56,7 +66,7 @@ impl Environment {
         }
     }
 
-    pub fn get(&self, key: &String) -> Option<Box<dyn Any>> {
+    pub fn get(&self, key: &String) -> Option<Rc<dyn Any>> {
         match self.values.get(key) {
             None => match &self.enclosing {
                 None => return None,
@@ -64,13 +74,13 @@ impl Environment {
             },
             Some(val) => {
                 if let Some(value) = val.as_ref().downcast_ref::<f64>() {
-                    return Some(Box::new(value.clone()));
+                    return Some(Rc::new(value.clone()));
                 }
                 if let Some(value) = val.as_ref().downcast_ref::<String>() {
-                    return Some(Box::new(value.clone()));
+                    return Some(Rc::new(value.clone()));
                 }
                 if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                    return Some(Box::new(value.clone()));
+                    return Some(Rc::new(value.clone()));
                 }
                 return None;
             }
