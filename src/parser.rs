@@ -36,15 +36,69 @@ fn match_head(tokens: &LinkedList<Token>, slice: &[TokenType]) -> bool {
 }
 
 fn declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::FUN]) {
+        return function(tokens);
+    }
     if match_head(tokens, &[TokenType::VAR]) {
-        tokens.pop_front();
         return var_declaration(tokens);
     } else {
         return statement(tokens);
     }
 }
 
+fn function(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
+    if !match_head(tokens, &[TokenType::IDENTIFIER]) {
+        eprintln!("Invalide Token for function name.");
+        return None;
+    }
+    let nm = tokens.pop_front()?;
+
+    if !match_head(tokens, &[TokenType::LEFT_PAREN]) {
+        eprintln!("Expect ( but not found.");
+        return None;
+    }
+    tokens.pop_front();
+
+    let mut ps: LinkedList<Token> = LinkedList::new();
+    if !match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+        loop {
+            if ps.len() >= 255 {
+                eprintln!("Too many arguments.");
+            }
+            if !match_head(tokens, &[TokenType::IDENTIFIER]) {
+                eprintln!("Invalid argument.");
+            } else {
+                ps.push_back(tokens.pop_front()?);
+            }
+            if !match_head(tokens, &[TokenType::RIGHT_PAREN, TokenType::COMMA]) {
+                eprintln!("Invalid function definition.");
+                return None;
+            } else if match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+                break;
+            } else {
+                tokens.pop_front();
+            }
+        }
+    }
+    tokens.pop_front();
+
+    if !match_head(tokens, &[TokenType::LEFT_BRACE]) {
+        eprintln!("Not correct function body.");
+    }
+    let b: LinkedList<Box<Stmt>> = match block(tokens) {
+        None => return None,
+        Some(val) => val,
+    };
+    return Some(Box::new(Stmt::Function {
+        name: nm,
+        params: ps,
+        body: b,
+    }));
+}
+
 fn var_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
     if match_head(tokens, &[TokenType::IDENTIFIER]) {
         let name = tokens.pop_front().expect("Identifier Token.");
         let mut initializer: Option<Box<Expr>> = None;
@@ -79,16 +133,26 @@ fn statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     if match_head(tokens, &[TokenType::PRINT]) {
         return print_statement(tokens);
     }
+    if match_head(tokens, &[TokenType::RETURN]) {
+        return return_statement(tokens);
+    }
     if match_head(tokens, &[TokenType::WHILE]) {
         return while_statement(tokens);
     }
     if match_head(tokens, &[TokenType::LEFT_BRACE]) {
-        return block(tokens);
+        return block_statement(tokens);
     }
     return expression_statement(tokens);
 }
 
-fn block(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+fn block_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    match block(tokens) {
+        Some(val) => return Some(Box::new(Stmt::Block { statements: val })),
+        None => return None,
+    }
+}
+
+fn block(tokens: &mut LinkedList<Token>) -> Option<LinkedList<Box<Stmt>>> {
     let mut stmts: LinkedList<Box<Stmt>> = LinkedList::new();
     tokens.pop_front();
     while !match_head(tokens, &[TokenType::RIGHT_BRACE, TokenType::EOF]) {
@@ -103,7 +167,7 @@ fn block(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
         eprintln!("No matching '}}'.");
         return None;
     }
-    return Some(Box::new(Stmt::Block { statements: stmts }));
+    return Some(stmts);
 }
 
 fn if_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
@@ -145,6 +209,23 @@ fn if_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     }));
 }
 
+fn return_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    let token = tokens.pop_front()?;
+    let mut value: Option<Box<Expr>> = None;
+    if !match_head(tokens, &[TokenType::SEMICOLON]) {
+        value = expression(tokens);
+    }
+    if !match_head(tokens, &[TokenType::SEMICOLON]) {
+        eprintln!("Expect ';' after return.");
+        return None;
+    }
+    tokens.pop_front();
+    return Some(Box::new(Stmt::Return {
+        keyword: token,
+        value: value,
+    }));
+}
+
 fn while_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     tokens.pop_front();
     if !match_head(tokens, &[TokenType::LEFT_PAREN]) {
@@ -170,7 +251,10 @@ fn while_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
         None => return None,
         Some(val) => stmt = val,
     }
-    return Some(Box::new(Stmt::While { condition: cond, body: stmt}));
+    return Some(Box::new(Stmt::While {
+        condition: cond,
+        body: stmt,
+    }));
 }
 
 fn print_statement(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
@@ -404,7 +488,57 @@ fn unary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
             None => return None,
         };
     }
-    return primary(tokens);
+    return call(tokens);
+}
+
+fn call(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
+    let opt = primary(tokens);
+    let mut expr: Box<Expr>;
+
+    match opt {
+        Some(x) => expr = x,
+        None => return None,
+    }
+    loop {
+        if match_head(tokens, &[TokenType::LEFT_PAREN]) {
+            expr = match finish_call(tokens, expr) {
+                Some(val) => val,
+                None => return None,
+            };
+        } else {
+            break;
+        }
+    }
+    return Some(expr);
+}
+
+fn finish_call(tokens: &mut LinkedList<Token>, expr: Box<Expr>) -> Option<Box<Expr>> {
+    tokens.pop_front();
+    let mut args = LinkedList::<Box<Expr>>::new();
+    if !match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+        loop {
+            match expression(tokens) {
+                Some(val) => args.push_back(val),
+                None => return None,
+            }
+            if args.len() >= 255 {
+                eprintln!("Can't have more than 255 arguments.");
+            }
+            if !match_head(tokens, &[TokenType::RIGHT_PAREN, TokenType::COMMA]) {
+                eprintln!("Invalid expression call.");
+                return None;
+            } else if match_head(tokens, &[TokenType::RIGHT_PAREN]) {
+                break;
+            }
+            tokens.pop_front();
+        }
+    }
+    let p = tokens.pop_front()?;
+    return Some(Box::new(Expr::Call {
+        callee: expr,
+        paren: p,
+        arguments: args,
+    }));
 }
 
 fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {

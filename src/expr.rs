@@ -1,5 +1,6 @@
 use crate::token::Token;
 use std::any::Any;
+use std::collections::LinkedList;
 use std::fmt;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -10,6 +11,11 @@ pub enum Expr {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: LinkedList<Box<Expr>>,
     },
     Grouping {
         expression: Box<Expr>,
@@ -53,9 +59,18 @@ impl fmt::Display for Expr {
                 operator,
                 right,
             } => write!(f, "({:?} {} {})", operator, left, right),
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => write!(f, "{} {:?} {:?}", callee, paren.lexeme, arguments),
             Expr::Grouping { expression } => write!(f, "({})", expression),
             Expr::Literal { value } => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
-            Expr::Logical { left, operator, right } => write!(f, "({:?} {} {})", operator, left, right),
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => write!(f, "({:?} {} {})", operator, left, right),
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
             Expr::Variable { name } => write!(f, "{:?}", name.lexeme),
             Expr::Assign { name, value } => write!(f, "({:?} = {})", name.lexeme, value),

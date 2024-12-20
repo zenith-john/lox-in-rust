@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Error};
 use std::process;
 use std::rc::Rc;
 
+mod callable;
 mod expr;
 mod interpreter;
 mod parser;
@@ -37,14 +38,31 @@ fn run_file(path: &String) -> Result<(), Error> {
     let buffered = BufReader::new(input);
     let mut l: i32 = 1;
     let env: Rc<RefCell<Environment>> = Rc::new(RefCell::new(Environment::new()));
+    let mut tokens: LinkedList<Token> = LinkedList::new();
     for line in buffered.lines() {
-        match run(line?, l, env.clone()) {
-            Err(_) => process::exit(0x0041),
-            Ok(_) => {}
+        tokens.pop_back();
+        match scan_tokens(&line?, &mut l) {
+            None => {
+                eprintln!("Scanning Error");
+            }
+            Some(mut val) => {
+                tokens.append(&mut val);
+            }
         }
         l = l + 1;
     }
-    return Ok(());
+    let result = parser(&mut tokens);
+    match result {
+        Some(stmts) => match interpret(stmts, env) {
+            Ok(_) => return Ok(()),
+            Err(_e) => {
+                panic!("Runtime Error.");
+            }
+        },
+        None => {
+            panic!("Parsing Error.");
+        }
+    }
 }
 
 fn run_prompt() -> Result<(), Error> {

@@ -1,3 +1,4 @@
+use crate::callable::{Callable, LoxFunction};
 use crate::expr::Expr;
 use crate::stmt::{Environment, Stmt};
 use crate::token::{Token, TokenType};
@@ -6,17 +7,17 @@ use std::cell::RefCell;
 use std::collections::LinkedList;
 use std::rc::Rc;
 
-pub fn result_to_string(result: Rc<dyn Any>) -> String {
-    if let Some(value) = result.as_ref().downcast_ref::<f64>() {
+pub fn rc_to_string(rc: Rc<dyn Any>) -> String {
+    if let Some(value) = rc.as_ref().downcast_ref::<f64>() {
         return format!("{value}");
     }
-    if let Some(value) = result.as_ref().downcast_ref::<String>() {
+    if let Some(value) = rc.as_ref().downcast_ref::<String>() {
         return format!("{value}");
     }
-    if let Some(value) = result.as_ref().downcast_ref::<bool>() {
+    if let Some(value) = rc.as_ref().downcast_ref::<bool>() {
         return format!("{value}");
     } else {
-        return format!("{result:?}");
+        return format!("{rc:?}");
     }
 }
 
@@ -33,12 +34,24 @@ pub fn interpret(
     return Ok(());
 }
 
-fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'static str> {
+pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'static str> {
     match *stmt {
         Stmt::Expression { expression } => match evaluate(*expression, env.clone()) {
             None => return Err("Runtime Error"),
             _ => return Ok(()),
         },
+        Stmt::Function { name, params, body } => {
+            let fun = Rc::new(LoxFunction::new(name.clone(), params, body, env.clone()));
+            let st = name
+                .lexeme
+                .unwrap()
+                .as_ref()
+                .downcast_ref::<String>()
+                .ok_or("Not a correct identifier")?
+                .clone();
+            env.borrow_mut().define(st, fun);
+            return Ok(());
+        }
         Stmt::If {
             condition,
             then_branch,
@@ -65,11 +78,17 @@ fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'stati
         }
         Stmt::Print { expression } => {
             if let Some(value) = evaluate(*expression, env.clone()) {
-                println!("{}", result_to_string(value));
+                println!("{}", rc_to_string(value));
             } else {
                 return Err("Runtime Error");
             }
             return Ok(());
+        }
+        Stmt::Return {
+            keyword: _,
+            value: _,
+        } => {
+            return Ok(()); // Should not handle it here.
         }
         Stmt::Var { name, initializer } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
@@ -131,13 +150,39 @@ fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'stati
     }
 }
 
-fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>> {
+pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>> {
     match expr {
         Expr::Binary {
             left,
             operator,
             right,
         } => return binary_eval(*left, operator, *right, env),
+        Expr::Call {
+            callee,
+            paren: _,
+            arguments,
+        } => {
+            let callee_evaluated = match evaluate(*callee, env.clone()) {
+                None => return None,
+                Some(val) => val,
+            };
+            let mut args: LinkedList<Rc<dyn Any>> = LinkedList::new();
+            for expr in arguments {
+                match evaluate(*expr, env.clone()) {
+                    None => return None,
+                    Some(val) => args.push_back(val),
+                }
+            }
+            if let Ok(val) = callee_evaluated.clone().downcast::<LoxFunction>() {
+                return val.call(&mut args);
+            } else {
+                eprintln!(
+                    "Callee {} is not a function.",
+                    rc_to_string(callee_evaluated)
+                );
+                return None;
+            }
+        }
         Expr::Grouping { expression } => {
             return evaluate(*expression, env);
         }
@@ -176,7 +221,7 @@ fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>> {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
                 return match env.borrow_mut().get(key) {
                     None => {
-                        eprintln!("Undefined Variable.");
+                        eprintln!("Undefined Variable {}.", key);
                         None
                     }
                     Some(val) => Some(val),

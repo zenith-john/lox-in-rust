@@ -10,6 +10,11 @@ pub enum Stmt {
     Expression {
         expression: Box<Expr>,
     },
+    Function {
+        name: Token,
+        params: LinkedList<Token>,
+        body: LinkedList<Box<Stmt>>,
+    },
     If {
         condition: Box<Expr>,
         then_branch: Box<Stmt>,
@@ -17,6 +22,10 @@ pub enum Stmt {
     },
     Print {
         expression: Box<Expr>,
+    },
+    Return {
+        keyword: Token,
+        value: Option<Box<Expr>>,
     },
     Var {
         name: Token,
@@ -82,7 +91,7 @@ impl Environment {
                 if let Some(value) = val.as_ref().downcast_ref::<bool>() {
                     return Some(Rc::new(value.clone()));
                 }
-                return None;
+                return Some(val.clone());
             }
         }
     }
