@@ -64,35 +64,39 @@ impl Environment {
         return self.values.insert(key, value);
     }
 
-    pub fn assign(&mut self, key: String, value: Rc<dyn Any>) -> Option<Rc<dyn Any>> {
-        if self.values.contains_key(&key) {
+    pub fn is_defined(&self, key: String) -> bool {
+        return self.values.contains_key(&key);
+    }
+
+    pub fn assign(&mut self, key: String, value: Rc<dyn Any>, depth: i32) -> Option<Rc<dyn Any>> {
+        if depth == 0 {
             return self.values.insert(key, value);
         } else {
-            match &self.enclosing {
-                None => return None,
-                Some(env) => return env.borrow_mut().assign(key, value),
-            }
+            return (*self.enclosing.clone()?)
+                .borrow_mut()
+                .assign(key, value, depth - 1);
         }
     }
 
-    pub fn get(&self, key: &String) -> Option<Rc<dyn Any>> {
-        match self.values.get(key) {
-            None => match &self.enclosing {
+    pub fn get(&self, key: &String, depth: i32) -> Option<Rc<dyn Any>> {
+        if depth == 0 {
+            match self.values.get(key) {
                 None => return None,
-                Some(env) => return env.borrow_mut().get(key),
-            },
-            Some(val) => {
-                if let Some(value) = val.as_ref().downcast_ref::<f64>() {
-                    return Some(Rc::new(value.clone()));
+                Some(val) => {
+                    if let Some(value) = val.as_ref().downcast_ref::<f64>() {
+                        return Some(Rc::new(value.clone()));
+                    }
+                    if let Some(value) = val.as_ref().downcast_ref::<String>() {
+                        return Some(Rc::new(value.clone()));
+                    }
+                    if let Some(value) = val.as_ref().downcast_ref::<bool>() {
+                        return Some(Rc::new(value.clone()));
+                    }
+                    return Some(val.clone());
                 }
-                if let Some(value) = val.as_ref().downcast_ref::<String>() {
-                    return Some(Rc::new(value.clone()));
-                }
-                if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                    return Some(Rc::new(value.clone()));
-                }
-                return Some(val.clone());
             }
+        } else {
+            return (*self.enclosing.clone()?).borrow().get(key, depth - 1);
         }
     }
 }

@@ -1,6 +1,6 @@
 extern crate lazy_static;
 use std::cell::RefCell;
-use std::collections::LinkedList;
+use std::collections::{HashMap, LinkedList};
 use std::env;
 use std::fs::File;
 use std::io;
@@ -12,11 +12,13 @@ mod callable;
 mod expr;
 mod interpreter;
 mod parser;
+mod resolver;
 mod scanner;
 mod stmt;
 mod token;
 use crate::interpreter::interpret;
 use crate::parser::parser;
+use crate::resolver::resolve;
 use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
@@ -53,12 +55,18 @@ fn run_file(path: &String) -> Result<(), Error> {
     }
     let result = parser(&mut tokens);
     match result {
-        Some(stmts) => match interpret(stmts, env) {
-            Ok(_) => return Ok(()),
-            Err(_e) => {
-                panic!("Runtime Error.");
+        Some(stmts) => {
+            let mut table: HashMap<u64, i32> = HashMap::new();
+            let mut scopes: LinkedList<HashMap<String, bool>> = LinkedList::new();
+            scopes.push_front(HashMap::<String, bool>::new());
+            resolve(stmts.clone(), &mut scopes, &mut table);
+            match interpret(stmts, env, &table) {
+                Ok(_) => return Ok(()),
+                Err(_e) => {
+                    panic!("Runtime Error.");
+                }
             }
-        },
+        }
         None => {
             panic!("Parsing Error.");
         }
@@ -69,8 +77,11 @@ fn run_prompt() -> Result<(), Error> {
     let lines = io::stdin().lines();
     let mut l: i32 = 1;
     let env: Rc<RefCell<Environment>> = Rc::new(RefCell::new(Environment::new()));
+    let mut table: HashMap<u64, i32> = HashMap::new();
+    let mut scopes: LinkedList<HashMap<String, bool>> = LinkedList::new();
+    scopes.push_front(HashMap::<String, bool>::new());
     for line in lines {
-        match run(line.unwrap(), l, env.clone()) {
+        match run(line.unwrap(), l, env.clone(), &mut scopes, &mut table) {
             Err(_) => eprintln!("Error in evaluation"),
             Ok(_) => {}
         }
@@ -79,7 +90,13 @@ fn run_prompt() -> Result<(), Error> {
     return Ok(());
 }
 
-fn run(source: String, line_number: i32, env: Rc<RefCell<Environment>>) -> Result<(), ()> {
+fn run(
+    source: String,
+    line_number: i32,
+    env: Rc<RefCell<Environment>>,
+    scopes: &mut LinkedList<HashMap<String, bool>>,
+    table: &mut HashMap<u64, i32>,
+) -> Result<(), ()> {
     let mut line: i32 = line_number;
     let mut tokens: LinkedList<Token>;
     match scan_tokens(&source, &mut line) {
@@ -91,13 +108,16 @@ fn run(source: String, line_number: i32, env: Rc<RefCell<Environment>>) -> Resul
     }
     let result = parser(&mut tokens);
     match result {
-        Some(stmts) => match interpret(stmts, env) {
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                eprintln!("Line {}: {}", line_number, e);
-                return Err(());
+        Some(stmts) => {
+            resolve(stmts.clone(), scopes, table);
+            match interpret(stmts, env, &table) {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    eprintln!("Line {}: {}", line_number, e);
+                    return Err(());
+                }
             }
-        },
+        }
         None => {
             eprintln!("Line {}: Parser error", line_number);
             return Err(());

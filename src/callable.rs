@@ -3,7 +3,7 @@ use crate::stmt::{Environment, Stmt};
 use crate::token::Token;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::LinkedList;
+use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 pub trait Callable {
@@ -16,6 +16,7 @@ pub struct LoxFunction {
     params: LinkedList<Token>,
     body: LinkedList<Box<Stmt>>,
     closure: Rc<RefCell<Environment>>,
+    table: HashMap<u64, i32>,
 }
 
 impl LoxFunction {
@@ -24,12 +25,14 @@ impl LoxFunction {
         params: LinkedList<Token>,
         body: LinkedList<Box<Stmt>>,
         env: Rc<RefCell<Environment>>,
+        table: HashMap<u64, i32>,
     ) -> LoxFunction {
         LoxFunction {
             name: name,
             params: params,
             body: body,
             closure: env,
+            table: table,
         }
     }
 }
@@ -50,13 +53,25 @@ impl Callable for LoxFunction {
         }
         for stmt in self.body.clone() {
             match *stmt {
-                Stmt::Return { keyword: _, value } => match value {
+                Stmt::Return { keyword, value } => match value {
                     None => return Some(Rc::new(true)),
-                    Some(expr) => return evaluate(*expr, env.clone()),
+                    Some(expr) => match evaluate(*expr, env.clone(), &self.table) {
+                        None => {
+                            eprintln!("Error in line: {}", keyword.line);
+                            return None;
+                        }
+                        Some(val) => return Some(val),
+                    },
                 },
-                _ => match execute(stmt, env.clone()) {
+                _ => match execute(stmt, env.clone(), &self.table) {
                     Ok(()) => {}
-                    Err(_e) => return None,
+                    Err(_e) => {
+                        eprintln!(
+                            "Error in function {}",
+                            rc_to_string(self.name.lexeme.clone()?)
+                        );
+                        return None;
+                    }
                 },
             }
         }

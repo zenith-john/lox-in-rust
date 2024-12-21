@@ -34,10 +34,12 @@ pub enum Expr {
     },
     Variable {
         name: Token,
+        id: u64,
     },
     Assign {
         name: Token,
         value: Box<Expr>,
+        id: u64,
     },
 }
 
@@ -72,8 +74,8 @@ impl fmt::Display for Expr {
                 right,
             } => write!(f, "({:?} {} {})", operator, left, right),
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
-            Expr::Variable { name } => write!(f, "{:?}", name.lexeme),
-            Expr::Assign { name, value } => write!(f, "({:?} = {})", name.lexeme, value),
+            Expr::Variable { name, id } => write!(f, "{:?} {}", name.lexeme, id),
+            Expr::Assign { name, value, id } => write!(f, "({:?} {} = {})", name.lexeme, value, id),
         }
     }
 }

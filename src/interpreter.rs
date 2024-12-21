@@ -4,7 +4,7 @@ use crate::stmt::{Environment, Stmt};
 use crate::token::{Token, TokenType};
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::LinkedList;
+use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 pub fn rc_to_string(rc: Rc<dyn Any>) -> String {
@@ -24,9 +24,10 @@ pub fn rc_to_string(rc: Rc<dyn Any>) -> String {
 pub fn interpret(
     stmts: LinkedList<Box<Stmt>>,
     env: Rc<RefCell<Environment>>,
+    table: &HashMap<u64, i32>,
 ) -> Result<(), &'static str> {
     for stmt in stmts {
-        match execute(stmt, env.clone()) {
+        match execute(stmt, env.clone(), table) {
             Err(s) => return Err(s),
             Ok(()) => {}
         }
@@ -34,14 +35,24 @@ pub fn interpret(
     return Ok(());
 }
 
-pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'static str> {
+pub fn execute(
+    stmt: Box<Stmt>,
+    env: Rc<RefCell<Environment>>,
+    table: &HashMap<u64, i32>,
+) -> Result<(), &'static str> {
     match *stmt {
-        Stmt::Expression { expression } => match evaluate(*expression, env.clone()) {
+        Stmt::Expression { expression } => match evaluate(*expression, env.clone(), table) {
             None => return Err("Runtime Error"),
             _ => return Ok(()),
         },
         Stmt::Function { name, params, body } => {
-            let fun = Rc::new(LoxFunction::new(name.clone(), params, body, env.clone()));
+            let fun = Rc::new(LoxFunction::new(
+                name.clone(),
+                params,
+                body,
+                env.clone(),
+                table.clone(),
+            ));
             let st = name
                 .lexeme
                 .unwrap()
@@ -58,7 +69,7 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
             else_branch,
         } => {
             let is_true: bool;
-            match evaluate(*condition, env.clone()) {
+            match evaluate(*condition, env.clone(), table) {
                 None => return Err("Runtime Error"),
                 Some(val) => {
                     if let Some(value) = val.as_ref().downcast_ref::<bool>() {
@@ -70,14 +81,14 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
                 }
             }
             if is_true {
-                return execute(then_branch, env.clone());
+                return execute(then_branch, env.clone(), table);
             } else if let Some(branch) = else_branch {
-                return execute(branch, env.clone());
+                return execute(branch, env.clone(), table);
             }
             return Ok(());
         }
         Stmt::Print { expression } => {
-            if let Some(value) = evaluate(*expression, env.clone()) {
+            if let Some(value) = evaluate(*expression, env.clone(), table) {
                 println!("{}", rc_to_string(value));
             } else {
                 return Err("Runtime Error");
@@ -88,14 +99,18 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
             keyword: _,
             value: _,
         } => {
-            return Ok(()); // Should not handle it here.
+            return Err("Invalid return expression."); // Should not handle it here.
         }
         Stmt::Var { name, initializer } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+                if env.borrow().is_defined(key.to_string()) {
+                    eprintln!("Multiple definition of some variable {}.", key);
+                    return Err("Runtime Error");
+                }
                 match initializer {
                     None => env.borrow_mut().define(key.clone(), Rc::new(0)),
                     Some(val) => {
-                        let result = evaluate(*val, env.clone());
+                        let result = evaluate(*val, env.clone(), table);
                         match result {
                             Some(val) => env.borrow_mut().define(key.clone(), val),
                             None => return Err("Runtime Error"),
@@ -109,7 +124,7 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
         }
         Stmt::While { condition, body } => {
             let mut is_true: bool;
-            match evaluate(*condition.clone(), env.clone()) {
+            match evaluate(*condition.clone(), env.clone(), table) {
                 None => return Err("Runtime Error"),
                 Some(val) => {
                     if let Some(value) = val.as_ref().downcast_ref::<bool>() {
@@ -121,11 +136,11 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
                 }
             }
             while is_true {
-                match execute(body.clone(), env.clone()) {
+                match execute(body.clone(), env.clone(), table) {
                     Err(str) => return Err(str),
                     Ok(()) => {}
                 }
-                match evaluate(*condition.clone(), env.clone()) {
+                match evaluate(*condition.clone(), env.clone(), table) {
                     None => return Err("Runtime Error"),
                     Some(val) => {
                         if let Some(value) = val.as_ref().downcast_ref::<bool>() {
@@ -141,7 +156,7 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
         }
         Stmt::Block { statements } => {
             let new_env = Rc::new(RefCell::new(Environment::from(env.clone())));
-            match interpret(statements, new_env.clone()) {
+            match interpret(statements, new_env.clone(), table) {
                 Ok(()) => {}
                 Err(s) => return Err(s),
             }
@@ -150,25 +165,29 @@ pub fn execute(stmt: Box<Stmt>, env: Rc<RefCell<Environment>>) -> Result<(), &'s
     }
 }
 
-pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>> {
+pub fn evaluate(
+    expr: Expr,
+    env: Rc<RefCell<Environment>>,
+    table: &HashMap<u64, i32>,
+) -> Option<Rc<dyn Any>> {
     match expr {
         Expr::Binary {
             left,
             operator,
             right,
-        } => return binary_eval(*left, operator, *right, env),
+        } => return binary_eval(*left, operator, *right, env, table),
         Expr::Call {
             callee,
             paren: _,
             arguments,
         } => {
-            let callee_evaluated = match evaluate(*callee, env.clone()) {
+            let callee_evaluated = match evaluate(*callee, env.clone(), table) {
                 None => return None,
                 Some(val) => val,
             };
             let mut args: LinkedList<Rc<dyn Any>> = LinkedList::new();
             for expr in arguments {
-                match evaluate(*expr, env.clone()) {
+                match evaluate(*expr, env.clone(), table) {
                     None => return None,
                     Some(val) => args.push_back(val),
                 }
@@ -184,7 +203,7 @@ pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>
             }
         }
         Expr::Grouping { expression } => {
-            return evaluate(*expression, env);
+            return evaluate(*expression, env, table);
         }
         Expr::Literal { value } => return Some(value),
         Expr::Logical {
@@ -193,7 +212,7 @@ pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>
             right,
         } => {
             let is_true: bool;
-            match evaluate(*left, env.clone()) {
+            match evaluate(*left, env.clone(), table) {
                 None => return None,
                 Some(val) => {
                     if let Some(value) = val.as_ref().downcast_ref::<bool>() {
@@ -214,12 +233,13 @@ pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>
                 }
             }
 
-            return evaluate(*right, env.clone());
+            return evaluate(*right, env.clone(), table);
         }
-        Expr::Unary { operator, right } => return unitary_eval(operator, *right, env),
-        Expr::Variable { name } => {
+        Expr::Unary { operator, right } => return unitary_eval(operator, *right, env, table),
+        Expr::Variable { name, id } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
-                return match env.borrow_mut().get(key) {
+                let depth = table.get(&id)?;
+                return match env.borrow_mut().get(key, *depth) {
                     None => {
                         eprintln!("Undefined Variable {}.", key);
                         None
@@ -231,14 +251,15 @@ pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>
                 return None;
             }
         }
-        Expr::Assign { name, value } => {
+        Expr::Assign { name, value, id } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
                 let val: Rc<dyn Any>;
-                match evaluate(*value, env.clone()) {
+                let depth = table.get(&id)?;
+                match evaluate(*value, env.clone(), table) {
                     None => return None,
                     Some(x) => val = x,
                 }
-                return env.borrow_mut().assign(key.clone(), val);
+                return env.borrow_mut().assign(key.clone(), val, *depth);
             } else {
                 eprintln!("Invalid identifier.");
                 return None;
@@ -247,9 +268,14 @@ pub fn evaluate(expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>
     }
 }
 
-fn unitary_eval(token: Token, expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Rc<dyn Any>> {
+fn unitary_eval(
+    token: Token,
+    expr: Expr,
+    env: Rc<RefCell<Environment>>,
+    table: &HashMap<u64, i32>,
+) -> Option<Rc<dyn Any>> {
     let right;
-    match evaluate(expr, env.clone()) {
+    match evaluate(expr, env.clone(), table) {
         Some(x) => right = x,
         None => return None,
     }
@@ -291,14 +317,15 @@ fn binary_eval(
     token: Token,
     expr2: Expr,
     env: Rc<RefCell<Environment>>,
+    table: &HashMap<u64, i32>,
 ) -> Option<Rc<dyn Any>> {
     let left;
     let right;
-    match evaluate(expr1, env.clone()) {
+    match evaluate(expr1, env.clone(), table) {
         Some(x) => left = x,
         None => return None,
     }
-    match evaluate(expr2, env.clone()) {
+    match evaluate(expr2, env.clone(), table) {
         Some(x) => right = x,
         None => return None,
     }

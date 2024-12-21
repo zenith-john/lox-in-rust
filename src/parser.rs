@@ -3,6 +3,14 @@ use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
 use std::collections::LinkedList;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn get_count() -> u64 {
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    return id;
+}
 
 pub fn parser(tokens: &mut LinkedList<Token>) -> Option<LinkedList<Box<Stmt>>> {
     let mut statements: LinkedList<Box<Stmt>> = LinkedList::new();
@@ -299,15 +307,16 @@ fn assignment(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     if match_head(tokens, &[TokenType::EQUAL]) {
         tokens.pop_front();
         match *expr {
-            Expr::Variable { name: tok } => {
+            Expr::Variable { name, id: _ } => {
                 let val: Box<Expr>;
                 match assignment(tokens) {
                     Some(x) => val = x,
                     None => return None,
                 }
                 return Some(Box::new(Expr::Assign {
-                    name: tok,
+                    name: name,
                     value: val,
+                    id: get_count(),
                 }));
             }
             _ => return None,
@@ -586,7 +595,10 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     }
     if match_head(tokens, &[TokenType::IDENTIFIER]) {
         let token = tokens.pop_front().unwrap();
-        return Some(Box::new(Expr::Variable { name: token }));
+        return Some(Box::new(Expr::Variable {
+            name: token,
+            id: get_count(),
+        }));
     }
     error(tokens.front().unwrap(), "No matching.".to_string());
     return None;
