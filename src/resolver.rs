@@ -18,6 +18,36 @@ fn resolve_stmt(
     table: &mut HashMap<u64, i32>,
 ) {
     match *stmt {
+        Stmt::Block { statements } => {
+            begin_scope(scopes);
+            for stmt in statements {
+                resolve_stmt(stmt, scopes, table);
+            }
+            end_scope(scopes);
+            return;
+        }
+        Stmt::Class { name, methods } => {
+            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+                declare(key.to_string(), scopes);
+                define(key.to_string(), scopes);
+            }
+            begin_scope(scopes);
+            let t = "this".to_string();
+            declare(t.clone(), scopes);
+            define(t, scopes);
+            for method in methods {
+                match *method {
+                    Stmt::Function {
+                        name: _,
+                        params,
+                        body,
+                    } => resolve_function(params, body, scopes, table),
+                    _ => {}
+                }
+            }
+            end_scope(scopes);
+            return;
+        }
         Stmt::Expression { expression } => {
             resolve_expr(expression, scopes, table);
             return;
@@ -69,14 +99,6 @@ fn resolve_stmt(
             resolve_stmt(body, scopes, table);
             return;
         }
-        Stmt::Block { statements } => {
-            begin_scope(scopes);
-            for stmt in statements {
-                resolve_stmt(stmt, scopes, table);
-            }
-            end_scope(scopes);
-            return;
-        }
     }
 }
 
@@ -106,6 +128,10 @@ fn resolve_expr(
             }
             return;
         }
+        Expr::Get { object, name: _ } => {
+            resolve_expr(object, scopes, table);
+            return;
+        }
         Expr::Grouping { expression } => {
             resolve_expr(expression, scopes, table);
             return;
@@ -121,6 +147,18 @@ fn resolve_expr(
             resolve_expr(left, scopes, table);
             resolve_expr(right, scopes, table);
             return;
+        }
+        Expr::Set {
+            object,
+            name: _,
+            value,
+        } => {
+            resolve_expr(value, scopes, table);
+            resolve_expr(object, scopes, table);
+            return;
+        }
+        Expr::This { keyword: _, id } => {
+            resolve_local(id, &"this".to_string(), scopes, table);
         }
         Expr::Unary { operator: _, right } => {
             resolve_expr(right, scopes, table);

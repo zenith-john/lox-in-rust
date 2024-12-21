@@ -11,6 +11,7 @@ pub trait Callable {
     fn arity(&self) -> usize;
 }
 
+#[derive(Clone)]
 pub struct LoxFunction {
     name: Token,
     params: LinkedList<Token>,
@@ -34,6 +35,14 @@ impl LoxFunction {
             closure: env,
             table: table,
         }
+    }
+
+    pub fn bind(self, instance: Rc<RefCell<LoxInstance>>) -> LoxFunction {
+        let new_env = self.closure.clone();
+        new_env
+            .borrow_mut()
+            .define("this".to_string(), instance.clone());
+        return Self::new(self.name, self.params, self.body, new_env, self.table);
     }
 }
 
@@ -76,5 +85,68 @@ impl Callable for LoxFunction {
             }
         }
         return Some(Rc::new(true));
+    }
+}
+
+#[derive(Clone)]
+pub struct LoxClass {
+    name: Token,
+    methods: HashMap<String, LoxFunction>,
+}
+
+impl LoxClass {
+    pub fn new(name: Token, methods: HashMap<String, LoxFunction>) -> LoxClass {
+        return LoxClass {
+            name: name,
+            methods: methods,
+        };
+    }
+
+    pub fn find_method(&self, method: String) -> Option<LoxFunction> {
+        return self.methods.get(&method).cloned();
+    }
+}
+
+impl Callable for LoxClass {
+    fn call(&self, _arguments: &mut LinkedList<Rc<dyn Any>>) -> Option<Rc<dyn Any>> {
+        return Some(Rc::new(RefCell::new(LoxInstance::new(self.clone()))));
+    }
+    fn arity(&self) -> usize {
+        return 0;
+    }
+}
+
+#[derive(Clone)]
+pub struct LoxInstance {
+    pub klass: LoxClass,
+    pub fields: HashMap<String, Rc<dyn Any>>,
+}
+
+impl LoxInstance {
+    pub fn new(klass: LoxClass) -> LoxInstance {
+        return LoxInstance {
+            klass: klass,
+            fields: HashMap::new(),
+        };
+    }
+
+    // pub fn get(&mut self, name: Token) -> Option<Rc<dyn Any>> {
+    //     let st = name.lexeme.unwrap().as_ref().downcast_ref::<String>()?.to_string();
+    //     if self.fields.contains_key(&st) {
+    //         return self.fields.get(&st).cloned();
+    //     }
+
+    //     eprintln!("Undefined property.");
+    //     return None;
+    // }
+
+    pub fn set(&mut self, name: Token, value: Rc<dyn Any>) -> Option<Rc<dyn Any>> {
+        let st = name
+            .lexeme
+            .unwrap()
+            .as_ref()
+            .downcast_ref::<String>()?
+            .to_string();
+        return self.fields.insert(st, value.clone());
     }
 }

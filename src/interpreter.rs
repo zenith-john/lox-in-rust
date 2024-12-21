@@ -1,4 +1,4 @@
-use crate::callable::{Callable, LoxFunction};
+use crate::callable::{Callable, LoxClass, LoxFunction, LoxInstance};
 use crate::expr::Expr;
 use crate::stmt::{Environment, Stmt};
 use crate::token::{Token, TokenType};
@@ -41,6 +41,50 @@ pub fn execute(
     table: &HashMap<u64, i32>,
 ) -> Result<(), &'static str> {
     match *stmt {
+        Stmt::Block { statements } => {
+            let new_env = Rc::new(RefCell::new(Environment::from(env.clone())));
+            match interpret(statements, new_env.clone(), table) {
+                Ok(()) => {}
+                Err(s) => return Err(s),
+            }
+            return Ok(());
+        }
+        Stmt::Class { name, methods } => {
+            let mut kmethods: HashMap<String, LoxFunction> = HashMap::new();
+            for method in methods {
+                match *method {
+                    Stmt::Function {
+                        name: new_name,
+                        params,
+                        body,
+                    } => {
+                        let st = new_name
+                            .lexeme
+                            .clone()
+                            .unwrap()
+                            .as_ref()
+                            .downcast_ref::<String>()
+                            .ok_or("Not a correct identifier")?
+                            .clone();
+                        kmethods.insert(
+                            st,
+                            LoxFunction::new(new_name, params, body, env.clone(), table.clone()),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            let klass = Rc::new(LoxClass::new(name.clone(), kmethods));
+            let st = name
+                .lexeme
+                .unwrap()
+                .as_ref()
+                .downcast_ref::<String>()
+                .ok_or("Not a correct identifier")?
+                .clone();
+            env.borrow_mut().define(st, klass);
+            return Ok(());
+        }
         Stmt::Expression { expression } => match evaluate(*expression, env.clone(), table) {
             None => return Err("Runtime Error"),
             _ => return Ok(()),
@@ -154,14 +198,6 @@ pub fn execute(
             }
             return Ok(());
         }
-        Stmt::Block { statements } => {
-            let new_env = Rc::new(RefCell::new(Environment::from(env.clone())));
-            match interpret(statements, new_env.clone(), table) {
-                Ok(()) => {}
-                Err(s) => return Err(s),
-            }
-            return Ok(());
-        }
     }
 }
 
@@ -194,11 +230,36 @@ pub fn evaluate(
             }
             if let Ok(val) = callee_evaluated.clone().downcast::<LoxFunction>() {
                 return val.call(&mut args);
+            } else if let Ok(val) = callee_evaluated.clone().downcast::<LoxClass>() {
+                return val.call(&mut args);
             } else {
                 eprintln!(
                     "Callee {} is not a function.",
                     rc_to_string(callee_evaluated)
                 );
+                return None;
+            }
+        }
+        Expr::Get { object, name } => {
+            let ob = evaluate(*object, env, table)?;
+            if let Ok(val) = ob.clone().downcast::<RefCell<LoxInstance>>() {
+                let st = name
+                    .lexeme
+                    .unwrap()
+                    .as_ref()
+                    .downcast_ref::<String>()?
+                    .to_string();
+                if val.borrow_mut().fields.contains_key(&st) {
+                    return val.borrow_mut().fields.get(&st).cloned();
+                }
+                if let Some(method) = val.clone().borrow_mut().klass.find_method(st) {
+                    return Some(Rc::new(method.bind(val)));
+                }
+
+                eprintln!("Undefined property.");
+                return None;
+            } else {
+                eprintln!("Invalid property call.");
                 return None;
             }
         }
@@ -235,6 +296,31 @@ pub fn evaluate(
 
             return evaluate(*right, env.clone(), table);
         }
+        Expr::Set {
+            object,
+            name,
+            value,
+        } => {
+            let ob = evaluate(*object, env.clone(), table)?;
+            if let Ok(val) = ob.clone().downcast::<RefCell<LoxInstance>>() {
+                let v = evaluate(*value, env.clone(), table)?;
+                val.borrow_mut().set(name, v.clone());
+                return Some(v);
+            } else {
+                eprintln!("Invalid property call.");
+                return None;
+            }
+        }
+        Expr::This { keyword: _, id } => {
+            let depth = table.get(&id)?;
+            match env.borrow_mut().get(&"this".to_string(), *depth) {
+                None => {
+                    eprintln!("Don't know what \"this\" refered to.");
+                    return None;
+                }
+                Some(val) => Some(val),
+            }
+        }
         Expr::Unary { operator, right } => return unitary_eval(operator, *right, env, table),
         Expr::Variable { name, id } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
@@ -242,7 +328,7 @@ pub fn evaluate(
                 return match env.borrow_mut().get(key, *depth) {
                     None => {
                         eprintln!("Undefined Variable {}.", key);
-                        None
+                        return None;
                     }
                     Some(val) => Some(val),
                 };

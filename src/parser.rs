@@ -44,8 +44,11 @@ fn match_head(tokens: &LinkedList<Token>, slice: &[TokenType]) -> bool {
 }
 
 fn declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if match_head(tokens, &[TokenType::CLASS]) {
+        return class_declaration(tokens);
+    }
     if match_head(tokens, &[TokenType::FUN]) {
-        return function(tokens);
+        return function_declaration(tokens);
     }
     if match_head(tokens, &[TokenType::VAR]) {
         return var_declaration(tokens);
@@ -54,10 +57,42 @@ fn declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     }
 }
 
-fn function(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+fn class_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     tokens.pop_front();
+    let name: Token;
     if !match_head(tokens, &[TokenType::IDENTIFIER]) {
-        eprintln!("Invalide Token for function name.");
+        eprintln!("Invalid Token for class name.");
+        return None;
+    }
+    name = tokens.pop_front()?;
+    if !match_head(tokens, &[TokenType::LEFT_BRACE]) {
+        eprintln!("Expect '{{' before class body.");
+        return None;
+    }
+    tokens.pop_front();
+    let mut methods: LinkedList<Box<Stmt>> = LinkedList::new();
+    while !match_head(tokens, &[TokenType::RIGHT_BRACE]) {
+        methods.push_back(function(tokens)?);
+    }
+    if !match_head(tokens, &[TokenType::RIGHT_BRACE]) {
+        eprintln!("Expect '}}' after class body.");
+        return None;
+    }
+    tokens.pop_front();
+    return Some(Box::new(Stmt::Class {
+        name: name,
+        methods: methods,
+    }));
+}
+
+fn function_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    tokens.pop_front();
+    return function(tokens);
+}
+
+fn function(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
+    if !match_head(tokens, &[TokenType::IDENTIFIER]) {
+        eprintln!("Invalid Token for function name.");
         return None;
     }
     let nm = tokens.pop_front()?;
@@ -319,6 +354,14 @@ fn assignment(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
                     id: get_count(),
                 }));
             }
+            Expr::Get { object, name } => {
+                let val = assignment(tokens)?;
+                return Some(Box::new(Expr::Set {
+                    object: object,
+                    name: name,
+                    value: val,
+                }));
+            }
             _ => return None,
         }
     }
@@ -514,6 +557,16 @@ fn call(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
                 Some(val) => val,
                 None => return None,
             };
+        } else if match_head(tokens, &[TokenType::DOT]) {
+            tokens.pop_front();
+            if !match_head(tokens, &[TokenType::IDENTIFIER]) {
+                eprintln!("Invalid class method.");
+            }
+            let name = tokens.pop_front()?;
+            expr = Box::new(Expr::Get {
+                object: expr,
+                name: name,
+            });
         } else {
             break;
         }
@@ -592,6 +645,13 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
         }
         tokens.pop_front();
         return Some(Box::new(Expr::Grouping { expression: expr }));
+    }
+    if match_head(tokens, &[TokenType::THIS]) {
+        let token = tokens.pop_front()?;
+        return Some(Box::new(Expr::This {
+            keyword: token,
+            id: get_count(),
+        }));
     }
     if match_head(tokens, &[TokenType::IDENTIFIER]) {
         let token = tokens.pop_front().unwrap();

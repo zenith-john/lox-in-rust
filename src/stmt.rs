@@ -7,6 +7,13 @@ use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
+    Block {
+        statements: LinkedList<Box<Stmt>>,
+    },
+    Class {
+        name: Token,
+        methods: LinkedList<Box<Stmt>>,
+    },
     Expression {
         expression: Box<Expr>,
     },
@@ -34,9 +41,6 @@ pub enum Stmt {
     While {
         condition: Box<Expr>,
         body: Box<Stmt>,
-    },
-    Block {
-        statements: LinkedList<Box<Stmt>>,
     },
 }
 

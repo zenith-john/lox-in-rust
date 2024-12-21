@@ -17,6 +17,10 @@ pub enum Expr {
         paren: Token,
         arguments: LinkedList<Box<Expr>>,
     },
+    Get {
+        object: Box<Expr>,
+        name: Token,
+    },
     Grouping {
         expression: Box<Expr>,
     },
@@ -27,6 +31,15 @@ pub enum Expr {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
+    },
+    Set {
+        object: Box<Expr>,
+        name: Token,
+        value: Box<Expr>,
+    },
+    This {
+        keyword: Token,
+        id: u64,
     },
     Unary {
         operator: Token,
@@ -66,6 +79,7 @@ impl fmt::Display for Expr {
                 paren,
                 arguments,
             } => write!(f, "{} {:?} {:?}", callee, paren.lexeme, arguments),
+            Expr::Get { object, name } => write!(f, "{}.{:?}", object, name.lexeme),
             Expr::Grouping { expression } => write!(f, "({})", expression),
             Expr::Literal { value } => write!(f, "{}", any_to_string(value.deref())), // Don't know why but it works.
             Expr::Logical {
@@ -73,6 +87,12 @@ impl fmt::Display for Expr {
                 operator,
                 right,
             } => write!(f, "({:?} {} {})", operator, left, right),
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => write!(f, "{}.{:?} = {}", object, name, value),
+            Expr::This { keyword: _, id } => write!(f, "this {}", id),
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
             Expr::Variable { name, id } => write!(f, "{:?} {}", name.lexeme, id),
             Expr::Assign { name, value, id } => write!(f, "({:?} {} = {})", name.lexeme, value, id),
