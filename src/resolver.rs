@@ -26,10 +26,25 @@ fn resolve_stmt(
             end_scope(scopes);
             return;
         }
-        Stmt::Class { name, methods } => {
+        Stmt::Class {
+            name,
+            superclass,
+            methods,
+        } => {
             if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
                 declare(key.to_string(), scopes);
                 define(key.to_string(), scopes);
+            }
+            let mut has_superclass = false;
+            if let Some(c) = superclass {
+                resolve_expr(c, scopes, table);
+                has_superclass = true;
+            }
+            if has_superclass {
+                begin_scope(scopes);
+                let s = "super".to_string();
+                declare(s.clone(), scopes);
+                define(s, scopes);
             }
             begin_scope(scopes);
             let t = "this".to_string();
@@ -46,6 +61,9 @@ fn resolve_stmt(
                 }
             }
             end_scope(scopes);
+            if has_superclass {
+                end_scope(scopes);
+            }
             return;
         }
         Stmt::Expression { expression } => {
@@ -156,6 +174,13 @@ fn resolve_expr(
             resolve_expr(value, scopes, table);
             resolve_expr(object, scopes, table);
             return;
+        }
+        Expr::Super {
+            keyword: _,
+            method: _,
+            id,
+        } => {
+            resolve_local(id, &"super".to_string(), scopes, table);
         }
         Expr::This { keyword: _, id } => {
             resolve_local(id, &"this".to_string(), scopes, table);

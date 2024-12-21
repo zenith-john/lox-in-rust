@@ -37,6 +37,11 @@ pub enum Expr {
         name: Token,
         value: Box<Expr>,
     },
+    Super {
+        keyword: Token,
+        method: Token,
+        id: u64,
+    },
     This {
         keyword: Token,
         id: u64,
@@ -92,6 +97,11 @@ impl fmt::Display for Expr {
                 name,
                 value,
             } => write!(f, "{}.{:?} = {}", object, name, value),
+            Expr::Super {
+                keyword: _,
+                method,
+                id,
+            } => write!(f, "super {:?} {}", method.lexeme, id),
             Expr::This { keyword: _, id } => write!(f, "this {}", id),
             Expr::Unary { operator, right } => write!(f, "({:?} {})", operator, right),
             Expr::Variable { name, id } => write!(f, "{:?} {}", name.lexeme, id),

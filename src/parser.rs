@@ -60,11 +60,23 @@ fn declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
 fn class_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     tokens.pop_front();
     let name: Token;
+    let mut superclass: Option<Box<Expr>> = None;
     if !match_head(tokens, &[TokenType::IDENTIFIER]) {
         eprintln!("Invalid Token for class name.");
         return None;
     }
     name = tokens.pop_front()?;
+    if match_head(tokens, &[TokenType::LESS]) {
+        tokens.pop_front();
+        if match_head(tokens, &[TokenType::IDENTIFIER]) {
+            superclass = Some(Box::new(Expr::Variable {
+                name: tokens.pop_front()?,
+                id: get_count(),
+            }));
+        } else {
+            eprintln!("Invalid superclass.");
+        }
+    }
     if !match_head(tokens, &[TokenType::LEFT_BRACE]) {
         eprintln!("Expect '{{' before class body.");
         return None;
@@ -81,6 +93,7 @@ fn class_declaration(tokens: &mut LinkedList<Token>) -> Option<Box<Stmt>> {
     tokens.pop_front();
     return Some(Box::new(Stmt::Class {
         name: name,
+        superclass: superclass,
         methods: methods,
     }));
 }
@@ -652,6 +665,25 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
             keyword: token,
             id: get_count(),
         }));
+    }
+    if match_head(tokens, &[TokenType::SUPER]) {
+        let keyword = tokens.pop_front()?;
+        if !match_head(tokens, &[TokenType::DOT]) {
+            eprintln!("Expect . after super.");
+            return None;
+        }
+        tokens.pop_front();
+        if match_head(tokens, &[TokenType::IDENTIFIER]) {
+            let method = tokens.pop_front()?;
+            return Some(Box::new(Expr::Super {
+                keyword: keyword,
+                method: method,
+                id: get_count(),
+            }));
+        } else {
+            eprintln!("Not an identifier after super.");
+            return None;
+        }
     }
     if match_head(tokens, &[TokenType::IDENTIFIER]) {
         let token = tokens.pop_front().unwrap();

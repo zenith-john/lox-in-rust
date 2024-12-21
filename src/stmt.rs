@@ -12,6 +12,7 @@ pub enum Stmt {
     },
     Class {
         name: Token,
+        superclass: Option<Box<Expr>>,
         methods: LinkedList<Box<Stmt>>,
     },
     Expression {

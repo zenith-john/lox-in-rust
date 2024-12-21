@@ -91,13 +91,19 @@ impl Callable for LoxFunction {
 #[derive(Clone)]
 pub struct LoxClass {
     name: Token,
+    superclass: Option<Rc<LoxClass>>,
     methods: HashMap<String, LoxFunction>,
 }
 
 impl LoxClass {
-    pub fn new(name: Token, methods: HashMap<String, LoxFunction>) -> LoxClass {
+    pub fn new(
+        name: Token,
+        superclass: Option<Rc<LoxClass>>,
+        methods: HashMap<String, LoxFunction>,
+    ) -> LoxClass {
         return LoxClass {
             name: name,
+            superclass: superclass,
             methods: methods,
         };
     }
@@ -105,11 +111,17 @@ impl LoxClass {
     pub fn find_method(&self, method: String) -> Option<LoxFunction> {
         return self.methods.get(&method).cloned();
     }
+
+    pub fn superclass(&self) -> Option<Rc<LoxClass>> {
+        return self.superclass.clone();
+    }
 }
 
 impl Callable for LoxClass {
     fn call(&self, _arguments: &mut LinkedList<Rc<dyn Any>>) -> Option<Rc<dyn Any>> {
-        return Some(Rc::new(RefCell::new(LoxInstance::new(self.clone()))));
+        return Some(Rc::new(RefCell::new(LoxInstance::new(Rc::new(
+            self.clone(),
+        )))));
     }
     fn arity(&self) -> usize {
         return 0;
@@ -118,12 +130,12 @@ impl Callable for LoxClass {
 
 #[derive(Clone)]
 pub struct LoxInstance {
-    pub klass: LoxClass,
+    pub klass: Rc<LoxClass>,
     pub fields: HashMap<String, Rc<dyn Any>>,
 }
 
 impl LoxInstance {
-    pub fn new(klass: LoxClass) -> LoxInstance {
+    pub fn new(klass: Rc<LoxClass>) -> LoxInstance {
         return LoxInstance {
             klass: klass,
             fields: HashMap::new(),

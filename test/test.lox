@@ -1,0 +1,80 @@
+var second = "Global";
+
+fun sayHi(first) {
+  print "Hi," + first + second;
+}
+
+sayHi("World");
+{
+  var second = "Block";
+  sayHi("You");
+}
+
+fun count(n) {
+  if (n > 1) count(n - 1);
+  print n;
+}
+
+count(3);
+
+var x = 1;
+var y = 10;
+print x;
+if (x == y) {
+  print "Yes";
+}
+else {
+  print y;
+}
+
+while (x != y) {
+  if (x < y) {
+    x = x + 1;
+  }
+  else {
+    x = x - 1;
+  }
+  print x;
+}
+
+class Cream {
+  serve() {
+    this.time = this.time + 1;
+    print "CREAM";
+    print this.time;
+  }
+}
+
+var z = Cream();
+z.time = 0;
+z.serve();
+z.serve();
+z.serve();
+
+class Dream < Cream {
+  work() {
+    super.serve();
+  }
+  serve() {
+    this.time = this.time + 10;
+    print "DREAM";
+    print this.time;
+  }
+}
+
+var q = Dream();
+q.time = 100;
+q.serve();
+z.serve();
+q.work();
+q.serve();
+
+class Eream < Dream {
+}
+
+var w = Eream();
+w.time = 10;
+w.work();
+w.work();
+
+

@@ -49,7 +49,29 @@ pub fn execute(
             }
             return Ok(());
         }
-        Stmt::Class { name, methods } => {
+        Stmt::Class {
+            name,
+            superclass,
+            methods,
+        } => {
+            let mut sp: Option<Rc<LoxClass>> = None;
+            let mut local_env = env.clone();
+            if let Some(expr) = superclass {
+                if let Ok(val) = evaluate(*expr.clone(), env.clone(), table)
+                    .clone()
+                    .expect("Non empty")
+                    .downcast::<LoxClass>()
+                {
+                    sp = Some(val.clone());
+                    local_env = Rc::new(RefCell::new(Environment::from(env.clone())));
+                    local_env.borrow_mut().define("super".to_string(), val);
+                } else {
+                    eprintln!("{} is not a class name.", expr);
+                    return Err("Runtime Error");
+                }
+            }
+            local_env = Rc::new(RefCell::new(Environment::from(local_env.clone())));
+
             let mut kmethods: HashMap<String, LoxFunction> = HashMap::new();
             for method in methods {
                 match *method {
@@ -68,13 +90,19 @@ pub fn execute(
                             .clone();
                         kmethods.insert(
                             st,
-                            LoxFunction::new(new_name, params, body, env.clone(), table.clone()),
+                            LoxFunction::new(
+                                new_name,
+                                params,
+                                body,
+                                local_env.clone(),
+                                table.clone(),
+                            ),
                         );
                     }
                     _ => {}
                 }
             }
-            let klass = Rc::new(LoxClass::new(name.clone(), kmethods));
+            let klass = Rc::new(LoxClass::new(name.clone(), sp, kmethods));
             let st = name
                 .lexeme
                 .unwrap()
@@ -252,12 +280,19 @@ pub fn evaluate(
                 if val.borrow_mut().fields.contains_key(&st) {
                     return val.borrow_mut().fields.get(&st).cloned();
                 }
-                if let Some(method) = val.clone().borrow_mut().klass.find_method(st) {
-                    return Some(Rc::new(method.bind(val)));
+                let mut klass = val.clone().borrow_mut().klass.clone();
+                loop {
+                    if let Some(method) = klass.find_method(st.clone()) {
+                        return Some(Rc::new(method.bind(val)));
+                    }
+                    match klass.superclass() {
+                        None => {
+                            eprintln!("Undefined property.");
+                            return None;
+                        }
+                        Some(val) => klass = val,
+                    }
                 }
-
-                eprintln!("Undefined property.");
-                return None;
             } else {
                 eprintln!("Invalid property call.");
                 return None;
@@ -311,14 +346,66 @@ pub fn evaluate(
                 return None;
             }
         }
-        Expr::This { keyword: _, id } => {
+        Expr::Super {
+            keyword,
+            method,
+            id,
+        } => {
+            let depth = table.get(&id)?;
+            let superclass = match env.borrow_mut().get(&"super".to_string(), *depth) {
+                None => {
+                    eprintln!(
+                        "Line {}: Don't know what \"super\" refered to.",
+                        keyword.line
+                    );
+                    return None;
+                }
+                Some(val) => val.clone().downcast::<LoxClass>().expect("Lox Class"),
+            };
+            let object = match env.borrow_mut().get(&"this".to_string(), *depth - 1) {
+                None => {
+                    eprintln!(
+                        "Line {}: Don't know what \"this\" refered to.",
+                        keyword.line
+                    );
+                    return None;
+                }
+                Some(val) => val
+                    .clone()
+                    .downcast::<RefCell<LoxInstance>>()
+                    .expect("Lox Instance"),
+            };
+            let st = method
+                .lexeme
+                .unwrap()
+                .as_ref()
+                .downcast_ref::<String>()?
+                .to_string();
+            let mut klass = superclass.clone();
+            loop {
+                if let Some(method) = klass.find_method(st.clone()) {
+                    return Some(Rc::new(method.bind(object)));
+                }
+                match klass.superclass() {
+                    None => {
+                        eprintln!("Line {}: undefined property.", keyword.line);
+                        return None;
+                    }
+                    Some(val) => klass = val,
+                }
+            }
+        }
+        Expr::This { keyword, id } => {
             let depth = table.get(&id)?;
             match env.borrow_mut().get(&"this".to_string(), *depth) {
                 None => {
-                    eprintln!("Don't know what \"this\" refered to.");
+                    eprintln!(
+                        "Line {}: Don't know what \"this\" refered to.",
+                        keyword.line
+                    );
                     return None;
                 }
-                Some(val) => Some(val),
+                Some(val) => return Some(val),
             }
         }
         Expr::Unary { operator, right } => return unitary_eval(operator, *right, env, table),
