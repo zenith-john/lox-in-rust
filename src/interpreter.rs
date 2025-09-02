@@ -1,25 +1,10 @@
-use crate::callable::{Callable, LoxClass, LoxFunction, LoxInstance};
+use crate::callable::{Callable, LoxClass, LoxFunction};
 use crate::expr::Expr;
 use crate::stmt::{Environment, Stmt};
-use crate::token::{Token, TokenType};
-use std::any::Any;
+use crate::token::{BasicType, Token, TokenType};
 use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
-
-pub fn rc_to_string(rc: Rc<dyn Any>) -> String {
-    if let Some(value) = rc.as_ref().downcast_ref::<f64>() {
-        return format!("{value}");
-    }
-    if let Some(value) = rc.as_ref().downcast_ref::<String>() {
-        return format!("{value}");
-    }
-    if let Some(value) = rc.as_ref().downcast_ref::<bool>() {
-        return format!("{value}");
-    } else {
-        return format!("{rc:?}");
-    }
-}
 
 pub fn interpret(
     stmts: LinkedList<Box<Stmt>>,
@@ -27,27 +12,24 @@ pub fn interpret(
     table: &HashMap<u64, i32>,
 ) -> Result<(), &'static str> {
     for stmt in stmts {
-        match execute(stmt, env.clone(), table) {
-            Err(s) => return Err(s),
-            Ok(()) => {}
-        }
+        execute(*stmt, env.clone(), table)?
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn execute(
-    stmt: Box<Stmt>,
+    stmt: Stmt,
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
 ) -> Result<(), &'static str> {
-    match *stmt {
+    match stmt {
         Stmt::Block { statements } => {
             let new_env = Rc::new(RefCell::new(Environment::from(env.clone())));
             match interpret(statements, new_env.clone(), table) {
                 Ok(()) => {}
                 Err(s) => return Err(s),
             }
-            return Ok(());
+            Ok(())
         }
         Stmt::Class {
             name,
@@ -57,14 +39,14 @@ pub fn execute(
             let mut sp: Option<Rc<LoxClass>> = None;
             let mut local_env = env.clone();
             if let Some(expr) = superclass {
-                if let Ok(val) = evaluate(*expr.clone(), env.clone(), table)
+                if let Some(val) = evaluate(*expr.clone(), env.clone(), table)
                     .clone()
                     .expect("Non empty")
-                    .downcast::<LoxClass>()
+                    .as_class()
                 {
                     sp = Some(val.clone());
                     local_env = Rc::new(RefCell::new(Environment::from(env.clone())));
-                    local_env.borrow_mut().define("super".to_string(), val);
+                    local_env.borrow_mut().define("super".to_string(), BasicType::Class(val));
                 } else {
                     eprintln!("{} is not a class name.", expr);
                     return Err("Runtime Error");
@@ -74,48 +56,43 @@ pub fn execute(
 
             let mut kmethods: HashMap<String, LoxFunction> = HashMap::new();
             for method in methods {
-                match *method {
-                    Stmt::Function {
+                if let Stmt::Function {
                         name: new_name,
                         params,
                         body,
-                    } => {
-                        let st = new_name
-                            .lexeme
-                            .clone()
-                            .unwrap()
-                            .as_ref()
-                            .downcast_ref::<String>()
-                            .ok_or("Not a correct identifier")?
-                            .clone();
-                        kmethods.insert(
-                            st,
-                            LoxFunction::new(
-                                new_name,
-                                params,
-                                body,
-                                local_env.clone(),
-                                table.clone(),
-                            ),
-                        );
-                    }
-                    _ => {}
+                    } = *method {
+                    let st = new_name
+                        .lexeme
+                        .clone()
+                        .unwrap()
+                        .as_string()
+                        .ok_or("Not a correct identifier")?
+                        .clone();
+                    kmethods.insert(
+                        st,
+                        LoxFunction::new(
+                            new_name,
+                            params,
+                            body,
+                            local_env.clone(),
+                            table.clone(),
+                        ),
+                    );
                 }
             }
-            let klass = Rc::new(LoxClass::new(name.clone(), sp, kmethods));
+            let klass = BasicType::Class(Rc::new(LoxClass::new(name.clone(), sp, kmethods)));
             let st = name
                 .lexeme
                 .unwrap()
-                .as_ref()
-                .downcast_ref::<String>()
+                .as_string()
                 .ok_or("Not a correct identifier")?
                 .clone();
             env.borrow_mut().define(st, klass);
-            return Ok(());
+            Ok(())
         }
         Stmt::Expression { expression } => match evaluate(*expression, env.clone(), table) {
-            None => return Err("Runtime Error"),
-            _ => return Ok(()),
+            None => Err("Runtime Error"),
+            _ => Ok(()),
         },
         Stmt::Function { name, params, body } => {
             let fun = Rc::new(LoxFunction::new(
@@ -128,12 +105,11 @@ pub fn execute(
             let st = name
                 .lexeme
                 .unwrap()
-                .as_ref()
-                .downcast_ref::<String>()
+                .as_string()
                 .ok_or("Not a correct identifier")?
                 .clone();
-            env.borrow_mut().define(st, fun);
-            return Ok(());
+            env.borrow_mut().define(st, BasicType::Function(fun));
+            Ok(())
         }
         Stmt::If {
             condition,
@@ -144,8 +120,8 @@ pub fn execute(
             match evaluate(*condition, env.clone(), table) {
                 None => return Err("Runtime Error"),
                 Some(val) => {
-                    if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                        is_true = *value;
+                    if let Some(value) = val.as_bool() {
+                        is_true = value;
                     } else {
                         eprintln!("Statement in condition is not of bool type.");
                         return Err("Runtime Error");
@@ -153,34 +129,34 @@ pub fn execute(
                 }
             }
             if is_true {
-                return execute(then_branch, env.clone(), table);
+                return execute(*then_branch, env.clone(), table);
             } else if let Some(branch) = else_branch {
-                return execute(branch, env.clone(), table);
+                return execute(*branch, env.clone(), table);
             }
-            return Ok(());
+            Ok(())
         }
         Stmt::Print { expression } => {
             if let Some(value) = evaluate(*expression, env.clone(), table) {
-                println!("{}", rc_to_string(value));
+                println!("{}", value);
             } else {
                 return Err("Runtime Error");
             }
-            return Ok(());
+            Ok(())
         }
         Stmt::Return {
             keyword: _,
             value: _,
         } => {
-            return Err("Invalid return expression."); // Should not handle it here.
+            Err("Invalid return expression.") // Should not handle it here.
         }
         Stmt::Var { name, initializer } => {
-            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+            if let Some(key) = name.lexeme.unwrap().as_string() {
                 if env.borrow().is_defined(key.to_string()) {
                     eprintln!("Multiple definition of some variable {}.", key);
                     return Err("Runtime Error");
                 }
                 match initializer {
-                    None => env.borrow_mut().define(key.clone(), Rc::new(0)),
+                    None => env.borrow_mut().define(key.clone(), BasicType::Number(0.0)),
                     Some(val) => {
                         let result = evaluate(*val, env.clone(), table);
                         match result {
@@ -189,9 +165,9 @@ pub fn execute(
                         }
                     }
                 };
-                return Ok(());
+                Ok(())
             } else {
-                return Err("Invalid Variable Name");
+                Err("Invalid Variable Name")
             }
         }
         Stmt::While { condition, body } => {
@@ -199,8 +175,8 @@ pub fn execute(
             match evaluate(*condition.clone(), env.clone(), table) {
                 None => return Err("Runtime Error"),
                 Some(val) => {
-                    if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                        is_true = *value;
+                    if let Some(value) = val.as_bool() {
+                        is_true = value;
                     } else {
                         eprintln!("Statement in condition is not of bool type.");
                         return Err("Runtime Error");
@@ -208,15 +184,12 @@ pub fn execute(
                 }
             }
             while is_true {
-                match execute(body.clone(), env.clone(), table) {
-                    Err(str) => return Err(str),
-                    Ok(()) => {}
-                }
+                execute(*body.clone(), env.clone(), table)?;
                 match evaluate(*condition.clone(), env.clone(), table) {
                     None => return Err("Runtime Error"),
                     Some(val) => {
-                        if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                            is_true = *value;
+                        if let Some(value) = val.as_bool() {
+                            is_true = value;
                         } else {
                             eprintln!("Statement in condition is not of bool type.");
                             return Err("Runtime Error");
@@ -224,7 +197,7 @@ pub fn execute(
                     }
                 }
             }
-            return Ok(());
+            Ok(())
         }
     }
 }
@@ -233,57 +206,53 @@ pub fn evaluate(
     expr: Expr,
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
-) -> Option<Rc<dyn Any>> {
+) -> Option<BasicType> {
     match expr {
         Expr::Binary {
             left,
             operator,
             right,
-        } => return binary_eval(*left, operator, *right, env, table),
+        } => binary_eval(*left, operator, *right, env, table),
         Expr::Call {
             callee,
             paren: _,
             arguments,
         } => {
-            let callee_evaluated = match evaluate(*callee, env.clone(), table) {
-                None => return None,
-                Some(val) => val,
-            };
-            let mut args: LinkedList<Rc<dyn Any>> = LinkedList::new();
+            let callee_evaluated = evaluate(*callee, env.clone(), table)?;
+            let mut args: LinkedList<BasicType> = LinkedList::new();
             for expr in arguments {
                 match evaluate(*expr, env.clone(), table) {
                     None => return None,
                     Some(val) => args.push_back(val),
                 }
             }
-            if let Ok(val) = callee_evaluated.clone().downcast::<LoxFunction>() {
-                return val.call(&mut args);
-            } else if let Ok(val) = callee_evaluated.clone().downcast::<LoxClass>() {
-                return val.call(&mut args);
+            if let BasicType::Function(val) = callee_evaluated {
+                val.call(&mut args)
+            } else if let BasicType::Class(val) = callee_evaluated {
+                val.call(&mut args)
             } else {
                 eprintln!(
                     "Callee {} is not a function.",
-                    rc_to_string(callee_evaluated)
+                    callee_evaluated
                 );
-                return None;
+                None
             }
         }
         Expr::Get { object, name } => {
             let ob = evaluate(*object, env, table)?;
-            if let Ok(val) = ob.clone().downcast::<RefCell<LoxInstance>>() {
+            if let BasicType::Instance(val) = ob.clone() {
                 let st = name
                     .lexeme
                     .unwrap()
-                    .as_ref()
-                    .downcast_ref::<String>()?
-                    .to_string();
+                    .as_string()
+                    .unwrap();
                 if val.borrow_mut().fields.contains_key(&st) {
                     return val.borrow_mut().fields.get(&st).cloned();
                 }
-                let mut klass = val.clone().borrow_mut().klass.clone();
+                let mut klass = val.borrow_mut().clone().klass.clone();
                 loop {
                     if let Some(method) = klass.find_method(st.clone()) {
-                        return Some(Rc::new(method.bind(val)));
+                        return Some(BasicType::Function(Rc::new(method.bind(val))));
                     }
                     match klass.superclass() {
                         None => {
@@ -295,13 +264,13 @@ pub fn evaluate(
                 }
             } else {
                 eprintln!("Invalid property call.");
-                return None;
+                None
             }
         }
         Expr::Grouping { expression } => {
-            return evaluate(*expression, env, table);
+            evaluate(*expression, env, table)
         }
-        Expr::Literal { value } => return Some(value),
+        Expr::Literal { value } => Some(value),
         Expr::Logical {
             left,
             operator,
@@ -311,25 +280,22 @@ pub fn evaluate(
             match evaluate(*left, env.clone(), table) {
                 None => return None,
                 Some(val) => {
-                    if let Some(value) = val.as_ref().downcast_ref::<bool>() {
-                        is_true = *value;
+                    if let Some(value) = val.as_bool() {
+                        is_true = value;
                     } else {
                         eprintln!("Statement in condition is not of bool type.");
                         return None;
                     }
                 }
             }
-            if operator.ttype == TokenType::OR {
+            if operator.ttype == TokenType::Or {
                 if is_true {
-                    return Some(Rc::new(is_true));
+                    return Some(BasicType::Bool(is_true));
                 }
-            } else {
-                if !is_true {
-                    return Some(Rc::new(is_true));
-                }
+            } else if !is_true {
+                return Some(BasicType::Bool(is_true));
             }
-
-            return evaluate(*right, env.clone(), table);
+            evaluate(*right, env.clone(), table)
         }
         Expr::Set {
             object,
@@ -337,13 +303,13 @@ pub fn evaluate(
             value,
         } => {
             let ob = evaluate(*object, env.clone(), table)?;
-            if let Ok(val) = ob.clone().downcast::<RefCell<LoxInstance>>() {
+            if let BasicType::Instance(val) = ob.clone() {
                 let v = evaluate(*value, env.clone(), table)?;
                 val.borrow_mut().set(name, v.clone());
-                return Some(v);
+                Some(v)
             } else {
                 eprintln!("Invalid property call.");
-                return None;
+                None
             }
         }
         Expr::Super {
@@ -360,7 +326,7 @@ pub fn evaluate(
                     );
                     return None;
                 }
-                Some(val) => val.clone().downcast::<LoxClass>().expect("Lox Class"),
+                Some(val) => val.as_class().expect("Lox Class"),
             };
             let object = match env.borrow_mut().get(&"this".to_string(), *depth - 1) {
                 None => {
@@ -370,21 +336,18 @@ pub fn evaluate(
                     );
                     return None;
                 }
-                Some(val) => val
-                    .clone()
-                    .downcast::<RefCell<LoxInstance>>()
+                Some(val) => val.as_instance()
                     .expect("Lox Instance"),
             };
             let st = method
                 .lexeme
                 .unwrap()
-                .as_ref()
-                .downcast_ref::<String>()?
-                .to_string();
+                .as_string()
+                .unwrap();
             let mut klass = superclass.clone();
             loop {
                 if let Some(method) = klass.find_method(st.clone()) {
-                    return Some(Rc::new(method.bind(object)));
+                    return Some(BasicType::Function(Rc::new(method.bind(object))));
                 }
                 match klass.superclass() {
                     None => {
@@ -403,16 +366,16 @@ pub fn evaluate(
                         "Line {}: Don't know what \"this\" refered to.",
                         keyword.line
                     );
-                    return None;
+                    None
                 }
-                Some(val) => return Some(val),
+                Some(val) => Some(val),
             }
         }
-        Expr::Unary { operator, right } => return unitary_eval(operator, *right, env, table),
+        Expr::Unary { operator, right } => unitary_eval(operator, *right, env, table),
         Expr::Variable { name, id } => {
-            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
+            if let Some(key) = name.lexeme.unwrap().as_string() {
                 let depth = table.get(&id)?;
-                return match env.borrow_mut().get(key, *depth) {
+                return match env.borrow_mut().get(&key, *depth) {
                     None => {
                         eprintln!("Undefined Variable {}.", key);
                         return None;
@@ -421,21 +384,17 @@ pub fn evaluate(
                 };
             } else {
                 eprintln!("Invalid identifier.");
-                return None;
+                None
             }
         }
         Expr::Assign { name, value, id } => {
-            if let Some(key) = name.lexeme.unwrap().as_ref().downcast_ref::<String>() {
-                let val: Rc<dyn Any>;
+            if let Some(key) = name.lexeme.unwrap().as_string() {
                 let depth = table.get(&id)?;
-                match evaluate(*value, env.clone(), table) {
-                    None => return None,
-                    Some(x) => val = x,
-                }
+                let val: BasicType = evaluate(*value, env.clone(), table)?;
                 return env.borrow_mut().assign(key.clone(), val, *depth);
             } else {
                 eprintln!("Invalid identifier.");
-                return None;
+                None
             }
         }
     }
@@ -446,41 +405,27 @@ fn unitary_eval(
     expr: Expr,
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
-) -> Option<Rc<dyn Any>> {
-    let right;
-    match evaluate(expr, env.clone(), table) {
-        Some(x) => right = x,
-        None => return None,
-    }
+) -> Option<BasicType> {
+    let right = evaluate(expr, env.clone(), table)?;
 
     match token.ttype {
-        TokenType::MINUS => match right.downcast::<f64>() {
-            Ok(x) => return Some(Rc::new(-*x)),
+        TokenType::Minus => match right.as_number() {
+            Some(x) => Some(BasicType::Number(-x)),
             _ => {
                 error_type_mismatch();
                 None
             }
         },
-        TokenType::BANG => {
-            match right.as_ref().downcast_ref::<bool>() {
-                Some(x) => return Some(Rc::new(!*x)),
-                _ => {}
-            }
-
-            match right.as_ref().downcast_ref::<Option<bool>>() {
-                Some(x) => match *x {
-                    None => return Some(Rc::new(true)),
-                    Some(_x) => return Some(Rc::new(false)),
-                },
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
+        TokenType::Bang => {
+            if let Some(x) = right.as_bool() { Some(BasicType::Bool(!x)) }
+            else {
+                error_type_mismatch();
+                None
             }
         }
         _ => {
             eprintln!("Wrong operator.");
-            return None;
+            None
         }
     }
 }
@@ -491,79 +436,55 @@ fn binary_eval(
     expr2: Expr,
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
-) -> Option<Rc<dyn Any>> {
-    let left;
-    let right;
-    match evaluate(expr1, env.clone(), table) {
-        Some(x) => left = x,
-        None => return None,
-    }
-    match evaluate(expr2, env.clone(), table) {
-        Some(x) => right = x,
-        None => return None,
-    }
+) -> Option<BasicType> {
+    let left = evaluate(expr1, env.clone(), table)?;
+    let right = evaluate(expr2, env.clone(), table)?;
 
     match token.ttype {
-        TokenType::MINUS => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(*x - *y)),
+        TokenType::Minus => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Number(x - y)),
                 _ => {
                     error_type_mismatch();
                     None
                 }
             }
         }
-        TokenType::SLASH => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => divide(*x, *y).map(|b| b as Rc<dyn Any>),
+        TokenType::Slash => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => divide(x, y).map(BasicType::Number),
                 _ => {
                     error_type_mismatch();
                     None
                 }
             }
         }
-        TokenType::STAR => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(*x * *y)),
+        TokenType::Star => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Number(x * y)),
                 _ => {
                     error_type_mismatch();
                     None
                 }
             }
         }
-        TokenType::PLUS => {
-            match (
-                left.as_ref().downcast_ref::<f64>(),
-                right.as_ref().downcast_ref::<f64>(),
-            ) {
-                (Some(x), Some(y)) => return Some(Rc::new(*x + *y)),
-                _ => {}
-            }
+        TokenType::Plus => {
+            if let (Some(x), Some(y)) = (
+                left.as_number(),
+                right.as_number()
+            ) { return Some(BasicType::Number(x + y)) }
 
-            match (
-                left.as_ref().downcast_ref::<String>(),
-                right.as_ref().downcast_ref::<String>(),
-            ) {
-                (Some(x), Some(y)) => return Some(Rc::new(x.clone() + &*y)),
-                _ => {}
-            }
+            if let (Some(x), Some(y)) = (
+                left.as_string(),
+                right.as_string()
+            ) { return Some(BasicType::String(x.clone() + &*y)) }
             error_type_mismatch();
-            return None;
+            None
         }
 
-        TokenType::GREATER => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(x > y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
-            }
-        }
-
-        TokenType::GREATER_EQUAL => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(*x >= *y)),
+        TokenType::Greater => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Bool(x > y)),
                 _ => {
                     error_type_mismatch();
                     None
@@ -571,74 +492,54 @@ fn binary_eval(
             }
         }
 
-        TokenType::LESS => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(*x < *y)),
+        TokenType::GreaterEqual => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Bool(x >= y)),
                 _ => {
                     error_type_mismatch();
                     None
                 }
             }
         }
-        TokenType::LESS_EQUAL => {
-            return match (left.downcast::<f64>(), right.downcast::<f64>()) {
-                (Ok(x), Ok(y)) => Some(Rc::new(*x <= *y)),
+
+        TokenType::Less => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Bool(x < y)),
                 _ => {
                     error_type_mismatch();
                     None
                 }
             }
         }
-        TokenType::BANG_EQUAL => match is_equal(left, right) {
-            Some(x) => return Some(Rc::new(!*x)),
-            None => return None,
+        TokenType::LessEqual => {
+            match (left.as_number(), right.as_number()) {
+                (Some(x), Some(y)) => Some(BasicType::Bool(x <= y)),
+                _ => {
+                    error_type_mismatch();
+                    None
+                }
+            }
+        }
+        TokenType::BangEqual => {
+            Some(BasicType::Bool(! (left == right)))
         },
-        TokenType::EQUAL_EQUAL => {
-            return is_equal(left, right).map(|b| b as Rc<dyn Any>);
+        TokenType::EqualEqual => {
+            Some(BasicType::Bool( left == right))
         }
         _ => {
             eprintln!("Wrong operator.");
-            return None;
+            None
         }
     }
 }
 
-fn divide(numerator: f64, denominator: f64) -> Option<Rc<f64>> {
+fn divide(numerator: f64, denominator: f64) -> Option<f64> {
     if denominator == 0.0 {
         eprintln!("Divide by 0.");
         None
     } else {
-        Some(Rc::new(numerator / denominator))
+        Some(numerator / denominator)
     }
-}
-
-fn is_equal(l1: Rc<dyn Any>, l2: Rc<dyn Any>) -> Option<Rc<bool>> {
-    match (
-        l1.as_ref().downcast_ref::<f64>(),
-        l2.as_ref().downcast_ref::<f64>(),
-    ) {
-        (Some(x), Some(y)) => return Some(Rc::new(*x == *y)),
-        _ => {}
-    }
-
-    match (
-        l1.as_ref().downcast_ref::<bool>(),
-        l2.as_ref().downcast_ref::<bool>(),
-    ) {
-        (Some(x), Some(y)) => return Some(Rc::new(*x == *y)),
-        _ => {}
-    }
-
-    match (
-        l1.as_ref().downcast_ref::<String>(),
-        l2.as_ref().downcast_ref::<String>(),
-    ) {
-        (Some(x), Some(y)) => return Some(Rc::new(*x == *y)),
-        _ => {}
-    }
-
-    error_type_mismatch();
-    return None;
 }
 
 fn error_type_mismatch() {

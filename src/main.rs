@@ -51,7 +51,7 @@ fn run_file(path: &String) -> Result<(), Error> {
                 tokens.append(&mut val);
             }
         }
-        l = l + 1;
+        l += 1;
     }
     let result = parser(&mut tokens);
     match result {
@@ -61,7 +61,7 @@ fn run_file(path: &String) -> Result<(), Error> {
             scopes.push_front(HashMap::<String, bool>::new());
             resolve(stmts.clone(), &mut scopes, &mut table);
             match interpret(stmts, env, &table) {
-                Ok(_) => return Ok(()),
+                Ok(_) => Ok(()),
                 Err(_e) => {
                     panic!("Runtime Error.");
                 }
@@ -81,13 +81,10 @@ fn run_prompt() -> Result<(), Error> {
     let mut scopes: LinkedList<HashMap<String, bool>> = LinkedList::new();
     scopes.push_front(HashMap::<String, bool>::new());
     for line in lines {
-        match run(line.unwrap(), l, env.clone(), &mut scopes, &mut table) {
-            Err(_) => eprintln!("Error in evaluation"),
-            Ok(_) => {}
-        }
-        l = l + 1;
+        if run(line.unwrap(), l, env.clone(), &mut scopes, &mut table).is_err() { eprintln!("Error in evaluation") }
+        l += 1;
     }
-    return Ok(());
+    Ok(())
 }
 
 fn run(
@@ -110,17 +107,17 @@ fn run(
     match result {
         Some(stmts) => {
             resolve(stmts.clone(), scopes, table);
-            match interpret(stmts, env, &table) {
-                Ok(_) => return Ok(()),
+            match interpret(stmts, env, table) {
+                Ok(_) => Ok(()),
                 Err(e) => {
                     eprintln!("Line {}: {}", line_number, e);
-                    return Err(());
+                    Err(())
                 }
             }
         }
         None => {
             eprintln!("Line {}: Parser error", line_number);
-            return Err(());
+            Err(())
         }
     }
 }

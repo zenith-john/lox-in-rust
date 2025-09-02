@@ -1,80 +1,134 @@
-var second = "Global";
-
-fun sayHi(first) {
-  print "Hi," + first + second;
-}
-
-sayHi("World");
-{
-  var second = "Block";
-  sayHi("You");
-}
-
-fun count(n) {
-  if (n > 1) count(n - 1);
-  print n;
-}
-
-count(3);
-
-var x = 1;
-var y = 10;
-print x;
+var x = 1.0;
+var y = 1.0;
+var z = 2.0;
 if (x == y) {
-  print "Yes";
+  print "1: Wrong";
 }
 else {
-  print y;
+  print "1: Yes";
 }
 
-while (x != y) {
-  if (x < y) {
+if (y <= x) {
+  print "2: Yes";
+}
+else {
+  print "2: Wrong";
+}
+
+if (z - y >= x) {
+  print "3: Yes";
+} else {
+  print "3: Wrong";
+}
+
+if (y < x / 0.5) {
+  print "4: Yes";
+}
+else {
+  print "4: Wrong";
+}
+
+if (z * 2.1 > y) {
+  print "5: Yes";
+} else {
+  print "5: Wrong";
+}
+
+var a = "a1b2";
+var b = "c3d4";
+if (a + b == "a1b2c3d4") {
+  print "6: Yes";
+}
+else {
+  print "6: Wrong";
+}
+
+x = 1;
+y = 10;
+z = 0;
+while (x <= y) {
+  if (x <= y) {
+    z = z + x;
     x = x + 1;
   }
+}
+if (z <= 56 and z >= 54) {
+  print "7: Yes";
+}
+else {
+  print "7: Wrong";
+}
+
+print "Here";
+fun count(n) {
+  print n;
+  if (n > 1) {
+    var a = count(n - 1);
+    print a;
+    var b = count(n - 2);
+    print b;
+    return a + b;
+  }
   else {
-    x = x - 1;
+    print "Last cond";
+    var a = 1.0;
+    return a;
   }
-  print x;
 }
 
-class Cream {
+var w = count(1);
+if ((! (w <= 4)) and (w < 6)) {
+  print "8: Yes";
+}
+else {
+  print "8: Wrong";
+}
+
+class A {
   serve() {
-    this.time = this.time + 1;
-    print "CREAM";
-    print this.time;
+    this.t = this.t + 1;
   }
 }
 
-var z = Cream();
-z.time = 0;
-z.serve();
-z.serve();
-z.serve();
+var k = A();
+k.t = 0;
+k.serve();
+k.serve();
+k.serve();
+if (false or (k.t >= 2)) {
+  print "9: Yes";
+}
+else {
+  print k.t;
+  print "9: Wrong";
+}
 
-class Dream < Cream {
+class B < A {
   work() {
     super.serve();
   }
   serve() {
-    this.time = this.time + 10;
-    print "DREAM";
-    print this.time;
+    this.t = this.t + 10;
+    return;
+    print "10: Wrong";
   }
 }
 
-var q = Dream();
-q.time = 100;
-q.serve();
-z.serve();
-q.work();
-q.serve();
-
-class Eream < Dream {
+class C < B {
 }
 
-var w = Eream();
-w.time = 10;
+var w = C();
+w.t = 10;
 w.work();
+w.serve();
 w.work();
+
+if (w.t >= 21 and w.t < 23) {
+  print "10: Yes";
+}
+else {
+  print w.t;
+  print "10: Wrong";
+}
 
 

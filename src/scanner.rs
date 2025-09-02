@@ -1,38 +1,37 @@
 use crate::error;
-use crate::token::{Token, TokenType};
+use crate::token::{Token, TokenType, BasicType};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, LinkedList};
-use std::rc::Rc;
 
 lazy_static! {
     static ref keywords: HashMap<String, TokenType> = HashMap::from([
-        ("and".to_string(), TokenType::AND),
-        ("class".to_string(), TokenType::CLASS),
-        ("else".to_string(), TokenType::ELSE),
-        ("false".to_string(), TokenType::FALSE),
-        ("for".to_string(), TokenType::FOR),
-        ("fun".to_string(), TokenType::FUN),
-        ("if".to_string(), TokenType::IF),
-        ("nil".to_string(), TokenType::NIL),
-        ("or".to_string(), TokenType::OR),
-        ("print".to_string(), TokenType::PRINT),
-        ("return".to_string(), TokenType::RETURN),
-        ("super".to_string(), TokenType::SUPER),
-        ("this".to_string(), TokenType::THIS),
-        ("true".to_string(), TokenType::TRUE),
-        ("var".to_string(), TokenType::VAR),
-        ("while".to_string(), TokenType::WHILE),
+        ("and".to_string(), TokenType::And),
+        ("class".to_string(), TokenType::Class),
+        ("else".to_string(), TokenType::Else),
+        ("false".to_string(), TokenType::False),
+        ("for".to_string(), TokenType::For),
+        ("fun".to_string(), TokenType::Fun),
+        ("if".to_string(), TokenType::If),
+        ("nil".to_string(), TokenType::Nil),
+        ("or".to_string(), TokenType::Or),
+        ("print".to_string(), TokenType::Print),
+        ("return".to_string(), TokenType::Return),
+        ("super".to_string(), TokenType::Super),
+        ("this".to_string(), TokenType::This),
+        ("true".to_string(), TokenType::True),
+        ("var".to_string(), TokenType::Var),
+        ("while".to_string(), TokenType::While),
     ]);
 }
 
-pub fn scan_tokens(string: &String, line: &mut i32) -> Option<LinkedList<Token>> {
+pub fn scan_tokens(string: &str, line: &mut i32) -> Option<LinkedList<Token>> {
     let mut start: usize;
     let mut current: usize = 0;
     let mut tokens: LinkedList<Token> = LinkedList::new();
     let mut token: Option<Token>;
     while current < string.len() {
         start = current;
-        (token, current) = scan_token(&string, start, line);
+        (token, current) = scan_token(string, start, line);
         match token {
             Some(tok) => tokens.push_back(tok),
             None => {
@@ -43,84 +42,84 @@ pub fn scan_tokens(string: &String, line: &mut i32) -> Option<LinkedList<Token>>
         }
     }
     tokens.push_back(Token {
-        ttype: TokenType::EOF,
+        ttype: TokenType::Eof,
         lexeme: None,
         line: *line,
     });
-    return Some(tokens);
+    Some(tokens)
 }
 
-fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, usize) {
+fn scan_token(string: &str, pos: usize, line: &mut i32) -> (Option<Token>, usize) {
     let c: char = string.chars().nth(pos).expect("End of string.");
     let mut end: usize = pos;
     let mut token: Option<Token> = None;
     match c {
         '(' => {
             token = Some(Token {
-                ttype: TokenType::LEFT_PAREN,
+                ttype: TokenType::LeftParen,
                 lexeme: None,
                 line: *line,
             })
         }
         ')' => {
             token = Some(Token {
-                ttype: TokenType::RIGHT_PAREN,
+                ttype: TokenType::RightParen,
                 lexeme: None,
                 line: *line,
             })
         }
         '{' => {
             token = Some(Token {
-                ttype: TokenType::LEFT_BRACE,
+                ttype: TokenType::LeftBrace,
                 lexeme: None,
                 line: *line,
             })
         }
         '}' => {
             token = Some(Token {
-                ttype: TokenType::RIGHT_BRACE,
+                ttype: TokenType::RightBrace,
                 lexeme: None,
                 line: *line,
             })
         }
         ',' => {
             token = Some(Token {
-                ttype: TokenType::COMMA,
+                ttype: TokenType::Comma,
                 lexeme: None,
                 line: *line,
             })
         }
         '.' => {
             token = Some(Token {
-                ttype: TokenType::DOT,
+                ttype: TokenType::Dot,
                 lexeme: None,
                 line: *line,
             })
         }
         '-' => {
             token = Some(Token {
-                ttype: TokenType::MINUS,
+                ttype: TokenType::Minus,
                 lexeme: None,
                 line: *line,
             })
         }
         '+' => {
             token = Some(Token {
-                ttype: TokenType::PLUS,
+                ttype: TokenType::Plus,
                 lexeme: None,
                 line: *line,
             })
         }
         ';' => {
             token = Some(Token {
-                ttype: TokenType::SEMICOLON,
+                ttype: TokenType::Semicolon,
                 lexeme: None,
                 line: *line,
             })
         }
         '*' => {
             token = Some(Token {
-                ttype: TokenType::STAR,
+                ttype: TokenType::Star,
                 lexeme: None,
                 line: *line,
             })
@@ -129,14 +128,14 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '='
             {
                 token = Some(Token {
-                    ttype: TokenType::BANG_EQUAL,
+                    ttype: TokenType::BangEqual,
                     lexeme: None,
                     line: *line,
                 });
                 end = pos + 1
             } else {
                 token = Some(Token {
-                    ttype: TokenType::BANG,
+                    ttype: TokenType::Bang,
                     lexeme: None,
                     line: *line,
                 });
@@ -146,14 +145,14 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '='
             {
                 token = Some(Token {
-                    ttype: TokenType::EQUAL_EQUAL,
+                    ttype: TokenType::EqualEqual,
                     lexeme: None,
                     line: *line,
                 });
                 end = pos + 1
             } else {
                 token = Some(Token {
-                    ttype: TokenType::EQUAL,
+                    ttype: TokenType::Equal,
                     lexeme: None,
                     line: *line,
                 });
@@ -163,14 +162,14 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '='
             {
                 token = Some(Token {
-                    ttype: TokenType::LESS_EQUAL,
+                    ttype: TokenType::LessEqual,
                     lexeme: None,
                     line: *line,
                 });
                 end = pos + 1
             } else {
                 token = Some(Token {
-                    ttype: TokenType::LESS,
+                    ttype: TokenType::Less,
                     lexeme: None,
                     line: *line,
                 });
@@ -180,14 +179,14 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             if pos + 1 < string.len() && string.chars().nth(pos + 1).expect("End of string") == '='
             {
                 token = Some(Token {
-                    ttype: TokenType::GREATER_EQUAL,
+                    ttype: TokenType::GreaterEqual,
                     lexeme: None,
                     line: *line,
                 });
                 end = pos + 1
             } else {
                 token = Some(Token {
-                    ttype: TokenType::GREATER,
+                    ttype: TokenType::Greater,
                     lexeme: None,
                     line: *line,
                 });
@@ -199,7 +198,7 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
                 end = string.len();
             } else {
                 token = Some(Token {
-                    ttype: TokenType::SLASH,
+                    ttype: TokenType::Slash,
                     lexeme: None,
                     line: *line,
                 })
@@ -208,41 +207,41 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
         '"' => {
             end = pos + 1;
             while end < string.len() && string.chars().nth(end).expect("End of string") != '"' {
-                end = end + 1
+                end += 1
             }
             if end == string.len() {
                 error(*line, "Unterminated string.".to_string());
             } else {
                 token = Some(Token {
-                    ttype: TokenType::STRING,
-                    lexeme: Some(Rc::new(string[pos + 1..end].to_string())),
+                    ttype: TokenType::String,
+                    lexeme: Some(BasicType::String(string[pos + 1..end].to_string())),
                     line: *line,
                 })
             }
         }
         ' ' | '\t' | '\r' => {}
-        '\n' => *line = *line + 1,
+        '\n' => *line += 1,
         '0'..='9' => {
             end = pos;
             while end + 1 < string.len()
                 && is_digit(string.chars().nth(end + 1).expect("End of string"))
             {
-                end = end + 1;
+                end += 1;
             }
             if end + 2 < string.len()
                 && string.chars().nth(end + 1).expect("End of string") == '.'
                 && is_digit(string.chars().nth(end + 2).expect("End of string"))
             {
-                end = end + 2;
+                end += 2;
                 while end + 1 < string.len()
                     && is_digit(string.chars().nth(end + 1).expect("End of string"))
                 {
-                    end = end + 1;
+                    end += 1;
                 }
             }
             token = Some(Token {
-                ttype: TokenType::NUMBER,
-                lexeme: Some(Rc::new(string[pos..end + 1].parse::<f64>().unwrap())),
+                ttype: TokenType::Number,
+                lexeme: Some(BasicType::Number(string[pos..end + 1].parse::<f64>().unwrap())),
                 line: *line,
             })
         }
@@ -251,16 +250,16 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             while end + 1 < string.len()
                 && is_alpha_numeric(string.chars().nth(end + 1).expect("End of string"))
             {
-                end = end + 1;
+                end += 1;
             }
             let text = string[pos..end + 1].to_string();
             let ttype: TokenType = match keywords.get(&text) {
                 Some(i) => i.clone(),
-                None => TokenType::IDENTIFIER,
+                None => TokenType::Identifier,
             };
             token = Some(Token {
-                ttype: ttype,
-                lexeme: Some(Rc::new(text)),
+                ttype,
+                lexeme: Some(BasicType::String(text)),
                 line: *line,
             });
         }
@@ -269,19 +268,13 @@ fn scan_token(string: &String, pos: usize, line: &mut i32) -> (Option<Token>, us
             return (None, 0);
         }
     }
-    return (token, end + 1);
+    (token, end + 1)
 }
 
 fn is_digit(c: char) -> bool {
-    match c {
-        '0'..='9' => true,
-        _ => false,
-    }
+    c.is_ascii_digit()
 }
 
 fn is_alpha_numeric(c: char) -> bool {
-    match c {
-        '0'..='9' | 'a'..='z' | 'A'..='Z' => true,
-        _ => false,
-    }
+    matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z')
 }
