@@ -9,6 +9,7 @@ use std::process;
 use std::rc::Rc;
 
 mod callable;
+mod error;
 mod expr;
 mod interpreter;
 mod parser;
@@ -44,10 +45,10 @@ fn run_file(path: &String) -> Result<(), Error> {
     for line in buffered.lines() {
         tokens.pop_back();
         match scan_tokens(&line?, &mut l) {
-            None => {
-                eprintln!("Scanning Error");
+            Err(e) => {
+                eprintln!("{}", e);
             }
-            Some(mut val) => {
+            Ok(mut val) => {
                 tokens.append(&mut val);
             }
         }
@@ -55,7 +56,7 @@ fn run_file(path: &String) -> Result<(), Error> {
     }
     let result = parser(&mut tokens);
     match result {
-        Some(stmts) => {
+        Ok(stmts) => {
             let mut table: HashMap<u64, i32> = HashMap::new();
             let mut scopes: LinkedList<HashMap<String, bool>> = LinkedList::new();
             scopes.push_front(HashMap::<String, bool>::new());
@@ -67,8 +68,9 @@ fn run_file(path: &String) -> Result<(), Error> {
                 }
             }
         }
-        None => {
-            panic!("Parsing Error.");
+        Err(e) => {
+            eprintln!("{}", e);
+            panic!();
         }
     }
 }
@@ -97,17 +99,16 @@ fn run(
     table: &mut HashMap<u64, i32>,
 ) -> Result<(), ()> {
     let mut line: i32 = line_number;
-    let mut tokens: LinkedList<Token>;
-    match scan_tokens(&source, &mut line) {
-        None => {
-            eprintln!("Scanning Error.");
+    let mut tokens: LinkedList<Token> = match scan_tokens(&source, &mut line) {
+        Err(e) => {
+            eprintln!("{}", e);
             return Err(());
         }
-        Some(val) => tokens = val,
-    }
+        Ok(val) => val,
+    };
     let result = parser(&mut tokens);
     match result {
-        Some(stmts) => {
+        Ok(stmts) => {
             resolve(stmts.clone(), scopes, table);
             match interpret(stmts, env, table) {
                 Ok(_) => Ok(()),
@@ -117,8 +118,8 @@ fn run(
                 }
             }
         }
-        None => {
-            eprintln!("Line {}: Parser error", line_number);
+        Err(e) => {
+            eprintln!("{}", e);
             Err(())
         }
     }

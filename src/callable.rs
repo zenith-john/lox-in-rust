@@ -1,3 +1,4 @@
+use crate::error::RuntimeError;
 use crate::interpreter::{evaluate, execute};
 use crate::stmt::{Environment, Stmt};
 use crate::token::{BasicType, Token};
@@ -6,7 +7,7 @@ use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 pub trait Callable {
-    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Option<BasicType>;
+    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError>;
     fn arity(&self) -> usize;
 }
 
@@ -49,38 +50,40 @@ impl Callable for LoxFunction {
     fn arity(&self) -> usize {
         self.params.len()
     }
-    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Option<BasicType> {
+    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError> {
         if self.arity() != arguments.len() {
-            eprintln!("Wrong argument number.");
-            return None;
+            return Err(RuntimeError::new("Wrong argument number.".to_string()));
         }
         let env = Rc::new(RefCell::new(Environment::from(self.closure.clone())));
         for param in self.params.clone() {
-            env.borrow_mut()
-                .define((param.lexeme?).as_string().unwrap(), arguments.pop_front()?);
+            env.borrow_mut().define(
+                (param.lexeme.expect("Well defined variables."))
+                    .as_string()
+                    .unwrap(),
+                arguments
+                    .pop_front()
+                    .ok_or(RuntimeError::new("Invalid Argument".to_string()))?,
+            );
         }
         for stmt in self.body.clone() {
             match *stmt {
-                Stmt::Return { keyword, value } => match value {
-                    None => return Some(BasicType::Bool(true)),
-                    Some(expr) => match evaluate(*expr, env.clone(), &self.table) {
-                        None => {
-                            eprintln!("Error in line: {}", keyword.line);
-                            return None;
-                        }
-                        Some(val) => return Some(val),
-                    },
+                Stmt::Return { keyword: _, value } => match value {
+                    None => return Ok(BasicType::Bool(true)),
+                    Some(expr) => return evaluate(*expr, env.clone(), &self.table),
                 },
                 _ => match execute(*stmt, env.clone(), &self.table) {
                     Ok(()) => {}
-                    Err(_e) => {
-                        eprintln!("Error in function {}", self.name.lexeme.clone().unwrap());
-                        return None;
+                    Err(e) => {
+                        return Err(RuntimeError::new(format!(
+                            "Error in function {}\n{}",
+                            self.name.lexeme.clone().unwrap(),
+                            e
+                        )));
                     }
                 },
             }
         }
-        Some(BasicType::Bool(true))
+        Ok(BasicType::Bool(true))
     }
 }
 
@@ -114,8 +117,8 @@ impl LoxClass {
 }
 
 impl Callable for LoxClass {
-    fn call(&self, _arguments: &mut LinkedList<BasicType>) -> Option<BasicType> {
-        Some(BasicType::Instance(Rc::new(RefCell::new(
+    fn call(&self, _arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError> {
+        Ok(BasicType::Instance(Rc::new(RefCell::new(
             LoxInstance::new(Rc::new(self.clone())),
         ))))
     }
