@@ -51,10 +51,13 @@ fn resolve_stmt(
             define(t, scopes);
             for method in methods {
                 if let Stmt::Function {
-                        name: _,
-                        params,
-                        body,
-                    } = *method { resolve_function(params, body, scopes, table) }
+                    name: _,
+                    params,
+                    body,
+                } = *method
+                {
+                    resolve_function(params, body, scopes, table)
+                }
             }
             end_scope(scopes);
             if has_superclass {
@@ -138,8 +141,7 @@ fn resolve_expr(
         Expr::Grouping { expression } => {
             resolve_expr(expression, scopes, table);
         }
-        Expr::Literal { .. } => {
-        }
+        Expr::Literal { .. } => {}
         Expr::Logical {
             left,
             operator: _,

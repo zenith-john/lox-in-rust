@@ -81,7 +81,9 @@ fn run_prompt() -> Result<(), Error> {
     let mut scopes: LinkedList<HashMap<String, bool>> = LinkedList::new();
     scopes.push_front(HashMap::<String, bool>::new());
     for line in lines {
-        if run(line.unwrap(), l, env.clone(), &mut scopes, &mut table).is_err() { eprintln!("Error in evaluation") }
+        if run(line.unwrap(), l, env.clone(), &mut scopes, &mut table).is_err() {
+            eprintln!("Error in evaluation")
+        }
         l += 1;
     }
     Ok(())

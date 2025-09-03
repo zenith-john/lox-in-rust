@@ -1,0 +1,11 @@
+class A {
+  serve() {
+    this.t = this.t + 1;
+  }
+}
+var k = A();
+k.t = 0;
+k.serve();
+k.serve();
+k.serve();
+print k.t;

@@ -1,5 +1,5 @@
 use crate::error;
-use crate::token::{Token, TokenType, BasicType};
+use crate::token::{BasicType, Token, TokenType};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, LinkedList};
 
@@ -241,7 +241,9 @@ fn scan_token(string: &str, pos: usize, line: &mut i32) -> (Option<Token>, usize
             }
             token = Some(Token {
                 ttype: TokenType::Number,
-                lexeme: Some(BasicType::Number(string[pos..end + 1].parse::<f64>().unwrap())),
+                lexeme: Some(BasicType::Number(
+                    string[pos..end + 1].parse::<f64>().unwrap(),
+                )),
                 line: *line,
             })
         }

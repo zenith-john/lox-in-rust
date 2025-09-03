@@ -1,0 +1,27 @@
+class A {
+  serve() {
+    this.t = this.t + 1;
+  }
+}
+
+class B < A {
+  work() {
+    super.serve();
+  }
+  serve() {
+    this.t = this.t + 10;
+    return;
+    print "10: Wrong";
+  }
+}
+
+class C < B {
+}
+
+var w = C();
+w.t = 10;
+w.work();
+w.serve();
+w.work();
+
+print w.t;

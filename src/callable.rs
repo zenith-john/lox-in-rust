@@ -1,9 +1,9 @@
 use crate::interpreter::{evaluate, execute};
 use crate::stmt::{Environment, Stmt};
-use crate::token::{Token, BasicType};
+use crate::token::{BasicType, Token};
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::{HashMap, LinkedList};
+use std::rc::Rc;
 
 pub trait Callable {
     fn call(&self, arguments: &mut LinkedList<BasicType>) -> Option<BasicType>;
@@ -74,9 +74,7 @@ impl Callable for LoxFunction {
                 _ => match execute(*stmt, env.clone(), &self.table) {
                     Ok(()) => {}
                     Err(_e) => {
-                        eprintln!(
-                            "Error in function {}",
-                            self.name.lexeme.clone().unwrap());
+                        eprintln!("Error in function {}", self.name.lexeme.clone().unwrap());
                         return None;
                     }
                 },
@@ -117,9 +115,9 @@ impl LoxClass {
 
 impl Callable for LoxClass {
     fn call(&self, _arguments: &mut LinkedList<BasicType>) -> Option<BasicType> {
-        Some(BasicType::Instance(Rc::new(RefCell::new(LoxInstance::new(Rc::new(
-            self.clone(),
-        ))))))
+        Some(BasicType::Instance(Rc::new(RefCell::new(
+            LoxInstance::new(Rc::new(self.clone())),
+        ))))
     }
     fn arity(&self) -> usize {
         0
@@ -141,11 +139,7 @@ impl LoxInstance {
     }
 
     pub fn set(&mut self, name: Token, value: BasicType) -> Option<BasicType> {
-        let st = name
-            .lexeme
-            .unwrap()
-            .as_string()
-            .unwrap();
+        let st = name.lexeme.unwrap().as_string().unwrap();
         self.fields.insert(st, value.clone())
     }
 }

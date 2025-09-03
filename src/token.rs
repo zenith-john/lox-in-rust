@@ -1,4 +1,4 @@
-use crate::callable::{LoxFunction, LoxClass, LoxInstance};
+use crate::callable::{LoxClass, LoxFunction, LoxInstance};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -84,8 +84,7 @@ impl BasicType {
     pub fn as_string(&self) -> Option<String> {
         if let BasicType::String(s) = self {
             Some(s.clone())
-        }
-        else {
+        } else {
             None
         }
     }
@@ -93,8 +92,7 @@ impl BasicType {
     pub fn as_number(&self) -> Option<f64> {
         if let BasicType::Number(n) = self {
             Some(*n)
-        }
-        else {
+        } else {
             None
         }
     }
@@ -102,8 +100,7 @@ impl BasicType {
     pub fn as_bool(&self) -> Option<bool> {
         if let BasicType::Bool(b) = self {
             Some(*b)
-        }
-        else {
+        } else {
             None
         }
     }
@@ -111,16 +108,14 @@ impl BasicType {
     pub fn as_class(&self) -> Option<Rc<LoxClass>> {
         if let BasicType::Class(c) = self {
             Some(c.clone())
-        }
-        else {
+        } else {
             None
         }
     }
     pub fn as_instance(&self) -> Option<Rc<RefCell<LoxInstance>>> {
         if let BasicType::Instance(i) = self {
             Some(i.clone())
-        }
-        else {
+        } else {
             None
         }
     }

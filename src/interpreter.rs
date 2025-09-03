@@ -46,7 +46,9 @@ pub fn execute(
                 {
                     sp = Some(val.clone());
                     local_env = Rc::new(RefCell::new(Environment::from(env.clone())));
-                    local_env.borrow_mut().define("super".to_string(), BasicType::Class(val));
+                    local_env
+                        .borrow_mut()
+                        .define("super".to_string(), BasicType::Class(val));
                 } else {
                     eprintln!("{} is not a class name.", expr);
                     return Err("Runtime Error");
@@ -57,10 +59,11 @@ pub fn execute(
             let mut kmethods: HashMap<String, LoxFunction> = HashMap::new();
             for method in methods {
                 if let Stmt::Function {
-                        name: new_name,
-                        params,
-                        body,
-                    } = *method {
+                    name: new_name,
+                    params,
+                    body,
+                } = *method
+                {
                     let st = new_name
                         .lexeme
                         .clone()
@@ -70,13 +73,7 @@ pub fn execute(
                         .clone();
                     kmethods.insert(
                         st,
-                        LoxFunction::new(
-                            new_name,
-                            params,
-                            body,
-                            local_env.clone(),
-                            table.clone(),
-                        ),
+                        LoxFunction::new(new_name, params, body, local_env.clone(), table.clone()),
                     );
                 }
             }
@@ -231,21 +228,14 @@ pub fn evaluate(
             } else if let BasicType::Class(val) = callee_evaluated {
                 val.call(&mut args)
             } else {
-                eprintln!(
-                    "Callee {} is not a function.",
-                    callee_evaluated
-                );
+                eprintln!("Callee {} is not a function.", callee_evaluated);
                 None
             }
         }
         Expr::Get { object, name } => {
             let ob = evaluate(*object, env, table)?;
             if let BasicType::Instance(val) = ob.clone() {
-                let st = name
-                    .lexeme
-                    .unwrap()
-                    .as_string()
-                    .unwrap();
+                let st = name.lexeme.unwrap().as_string().unwrap();
                 if val.borrow_mut().fields.contains_key(&st) {
                     return val.borrow_mut().fields.get(&st).cloned();
                 }
@@ -267,9 +257,7 @@ pub fn evaluate(
                 None
             }
         }
-        Expr::Grouping { expression } => {
-            evaluate(*expression, env, table)
-        }
+        Expr::Grouping { expression } => evaluate(*expression, env, table),
         Expr::Literal { value } => Some(value),
         Expr::Logical {
             left,
@@ -336,14 +324,9 @@ pub fn evaluate(
                     );
                     return None;
                 }
-                Some(val) => val.as_instance()
-                    .expect("Lox Instance"),
+                Some(val) => val.as_instance().expect("Lox Instance"),
             };
-            let st = method
-                .lexeme
-                .unwrap()
-                .as_string()
-                .unwrap();
+            let st = method.lexeme.unwrap().as_string().unwrap();
             let mut klass = superclass.clone();
             loop {
                 if let Some(method) = klass.find_method(st.clone()) {
@@ -417,8 +400,9 @@ fn unitary_eval(
             }
         },
         TokenType::Bang => {
-            if let Some(x) = right.as_bool() { Some(BasicType::Bool(!x)) }
-            else {
+            if let Some(x) = right.as_bool() {
+                Some(BasicType::Bool(!x))
+            } else {
                 error_type_mismatch();
                 None
             }
@@ -441,91 +425,71 @@ fn binary_eval(
     let right = evaluate(expr2, env.clone(), table)?;
 
     match token.ttype {
-        TokenType::Minus => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Number(x - y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
+        TokenType::Minus => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Number(x - y)),
+            _ => {
+                error_type_mismatch();
+                None
             }
-        }
-        TokenType::Slash => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => divide(x, y).map(BasicType::Number),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
+        },
+        TokenType::Slash => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => divide(x, y).map(BasicType::Number),
+            _ => {
+                error_type_mismatch();
+                None
             }
-        }
-        TokenType::Star => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Number(x * y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
+        },
+        TokenType::Star => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Number(x * y)),
+            _ => {
+                error_type_mismatch();
+                None
             }
-        }
+        },
         TokenType::Plus => {
-            if let (Some(x), Some(y)) = (
-                left.as_number(),
-                right.as_number()
-            ) { return Some(BasicType::Number(x + y)) }
+            if let (Some(x), Some(y)) = (left.as_number(), right.as_number()) {
+                return Some(BasicType::Number(x + y));
+            }
 
-            if let (Some(x), Some(y)) = (
-                left.as_string(),
-                right.as_string()
-            ) { return Some(BasicType::String(x.clone() + &*y)) }
+            if let (Some(x), Some(y)) = (left.as_string(), right.as_string()) {
+                return Some(BasicType::String(x.clone() + &*y));
+            }
             error_type_mismatch();
             None
         }
 
-        TokenType::Greater => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Bool(x > y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
+        TokenType::Greater => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Bool(x > y)),
+            _ => {
+                error_type_mismatch();
+                None
             }
-        }
-
-        TokenType::GreaterEqual => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Bool(x >= y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
-            }
-        }
-
-        TokenType::Less => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Bool(x < y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
-            }
-        }
-        TokenType::LessEqual => {
-            match (left.as_number(), right.as_number()) {
-                (Some(x), Some(y)) => Some(BasicType::Bool(x <= y)),
-                _ => {
-                    error_type_mismatch();
-                    None
-                }
-            }
-        }
-        TokenType::BangEqual => {
-            Some(BasicType::Bool(! (left == right)))
         },
-        TokenType::EqualEqual => {
-            Some(BasicType::Bool( left == right))
-        }
+
+        TokenType::GreaterEqual => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Bool(x >= y)),
+            _ => {
+                error_type_mismatch();
+                None
+            }
+        },
+
+        TokenType::Less => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Bool(x < y)),
+            _ => {
+                error_type_mismatch();
+                None
+            }
+        },
+        TokenType::LessEqual => match (left.as_number(), right.as_number()) {
+            (Some(x), Some(y)) => Some(BasicType::Bool(x <= y)),
+            _ => {
+                error_type_mismatch();
+                None
+            }
+        },
+        TokenType::BangEqual => Some(BasicType::Bool(!(left == right))),
+        TokenType::EqualEqual => Some(BasicType::Bool(left == right)),
         _ => {
             eprintln!("Wrong operator.");
             None

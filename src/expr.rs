@@ -1,4 +1,4 @@
-use crate::token::{Token, BasicType};
+use crate::token::{BasicType, Token};
 use std::collections::LinkedList;
 use std::fmt;
 
@@ -92,7 +92,9 @@ impl fmt::Display for Expr {
             Expr::This { keyword: _, id } => write!(f, "this {}", id),
             Expr::Unary { operator, right } => write!(f, "({} {})", operator, right),
             Expr::Variable { name, id } => write!(f, "{} {}", name.lexeme.clone().unwrap(), id),
-            Expr::Assign { name, value, id } => write!(f, "({} {} = {})", name.lexeme.clone().unwrap(), value, id),
+            Expr::Assign { name, value, id } => {
+                write!(f, "({} {} = {})", name.lexeme.clone().unwrap(), value, id)
+            }
         }
     }
 }

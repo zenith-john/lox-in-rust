@@ -1,5 +1,5 @@
 use crate::expr::Expr;
-use crate::token::{Token, BasicType};
+use crate::token::{BasicType, Token};
 use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
@@ -85,8 +85,7 @@ impl Environment {
     pub fn get(&self, key: &String, depth: i32) -> Option<BasicType> {
         if depth == 0 {
             self.values.get(key).cloned()
-        }
-        else {
+        } else {
             return (*self.enclosing.clone()?).borrow().get(key, depth - 1);
         }
     }

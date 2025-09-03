@@ -1,0 +1,9 @@
+var x = 1.0;
+var y = 1.0;
+var z = 2.0;
+if (y <= x) {
+  print "Yes";
+}
+else {
+  print "Wrong";
+}

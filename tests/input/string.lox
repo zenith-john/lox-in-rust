@@ -1,0 +1,3 @@
+var a = "a1b2";
+var b = "c3d4";
+print a + b;

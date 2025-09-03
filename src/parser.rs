@@ -1,6 +1,6 @@
 use crate::expr::Expr;
 use crate::stmt::Stmt;
-use crate::token::{Token, TokenType, BasicType};
+use crate::token::{BasicType, Token, TokenType};
 use std::collections::LinkedList;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -574,7 +574,7 @@ fn primary(tokens: &mut LinkedList<Token>) -> Option<Box<Expr>> {
     if match_head(tokens, &[TokenType::Nil]) {
         tokens.pop_front();
         return Some(Box::new(Expr::Literal {
-            value: BasicType::None
+            value: BasicType::None,
         }));
     }
     if match_head(tokens, &[TokenType::Number, TokenType::String]) {
