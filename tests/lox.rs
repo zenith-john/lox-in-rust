@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use predicates::prelude::*;
+// use predicates::prelude::*;
 
 #[test]
 fn math1() {

@@ -1,5 +1,5 @@
 use crate::error::RuntimeError;
-use crate::interpreter::{evaluate, execute};
+use crate::interpreter::execute;
 use crate::stmt::{Environment, Stmt};
 use crate::token::{BasicType, Token};
 use std::cell::RefCell;
@@ -66,19 +66,16 @@ impl Callable for LoxFunction {
             );
         }
         for stmt in self.body.clone() {
-            match *stmt {
-                Stmt::Return { keyword: _, value } => match value {
-                    None => return Ok(BasicType::Bool(true)),
-                    Some(expr) => return evaluate(*expr, env.clone(), &self.table),
-                },
-                _ => match execute(*stmt, env.clone(), &self.table) {
-                    Ok(()) => {}
-                    Err(e) => {
+            match execute(*stmt, env.clone(), &self.table) {
+                Ok(()) => {}
+                Err(e) => match e {
+                    RuntimeError::ReturnValue(e) => return Ok(e),
+                    _ => {
                         return Err(RuntimeError::new(format!(
                             "Error in function {}\n{}",
                             self.name.lexeme.clone().unwrap(),
                             e
-                        )));
+                        )))
                     }
                 },
             }

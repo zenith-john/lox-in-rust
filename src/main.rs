@@ -17,6 +17,7 @@ mod resolver;
 mod scanner;
 mod stmt;
 mod token;
+use crate::error::RuntimeError;
 use crate::interpreter::interpret;
 use crate::parser::parser;
 use crate::resolver::resolve;
@@ -63,14 +64,21 @@ fn run_file(path: &String) -> Result<(), Error> {
             resolve(stmts.clone(), &mut scopes, &mut table);
             match interpret(stmts, env, &table) {
                 Ok(_) => Ok(()),
-                Err(_e) => {
-                    panic!("Runtime Error.");
-                }
+                Err(e) => match e {
+                    RuntimeError::ReturnValue(val) => match val.as_number() {
+                        Some(v) => process::exit(v as i32),
+                        None => process::exit(-1),
+                    },
+                    _ => {
+                        eprintln!("{}", e);
+                        process::exit(-1);
+                    }
+                },
             }
         }
         Err(e) => {
             eprintln!("{}", e);
-            panic!();
+            process::exit(-1);
         }
     }
 }
@@ -123,8 +131,4 @@ fn run(
             Err(())
         }
     }
-}
-
-pub fn error(line: i32, message: String) {
-    eprintln!("[Line {}] Error: {}", line, message);
 }

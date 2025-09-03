@@ -1,3 +1,5 @@
+use crate::token::BasicType;
+
 #[derive(Debug)]
 pub struct ScanError {
     line: i32,
@@ -6,7 +8,7 @@ pub struct ScanError {
 
 impl std::fmt::Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Scanner Error:\nLine {}: {}", self.line, self.reason)
+        write!(f, "Scanner Error: Line {}, {}", self.line, self.reason)
     }
 }
 impl std::error::Error for ScanError {}
@@ -25,7 +27,7 @@ pub struct ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Parser Error:\nLine {}: {}", self.line, self.reason)
+        write!(f, "Parser Error: Line {}, {}", self.line, self.reason)
     }
 }
 impl std::error::Error for ParseError {}
@@ -37,19 +39,23 @@ impl ParseError {
 }
 
 #[derive(Debug)]
-pub struct RuntimeError {
-    reason: String,
+pub enum RuntimeError {
+    Reason(String),
+    ReturnValue(BasicType),
 }
 
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Runtime Error:\n{}", self.reason)
+        match self {
+            RuntimeError::Reason(s) => write!(f, "Runtime Error: {}", s),
+            RuntimeError::ReturnValue(_s) => write!(f, "Uncaught return."),
+        }
     }
 }
 impl std::error::Error for RuntimeError {}
 
 impl RuntimeError {
     pub fn new(reason: String) -> RuntimeError {
-        RuntimeError { reason }
+        RuntimeError::Reason(reason)
     }
 }

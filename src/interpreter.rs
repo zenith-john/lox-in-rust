@@ -139,10 +139,13 @@ pub fn execute(
             }
             Err(e) => Err(e),
         },
-        Stmt::Return {
-            keyword: _,
-            value: _,
-        } => Err(RuntimeError::new("Invalid return expression.".to_string())),
+        Stmt::Return { keyword: _, value } => match value {
+            None => return Err(RuntimeError::ReturnValue(BasicType::None)),
+            Some(expr) => match evaluate(*expr, env.clone(), table) {
+                Ok(val) => return Err(RuntimeError::ReturnValue(val)),
+                Err(e) => return Err(e),
+            },
+        },
         Stmt::Var { name, initializer } => {
             if let Some(key) = name.lexeme.unwrap().as_string() {
                 if env.borrow().is_defined(key.to_string()) {
@@ -307,7 +310,7 @@ pub fn evaluate(
             }
         }
         Expr::Super {
-            keyword: _,
+            keyword,
             method,
             id,
         } => {
@@ -367,7 +370,10 @@ pub fn evaluate(
             if let Some(key) = name.lexeme.unwrap().as_string() {
                 let depth = table.get(&id).expect("ID automatically generated.");
                 let val: BasicType = evaluate(*value, env.clone(), table)?;
-                return Ok(env.borrow_mut().assign(key.clone(), val, *depth).expect("Always initialized."));
+                return Ok(env
+                    .borrow_mut()
+                    .assign(key.clone(), val, *depth)
+                    .expect("Always initialized."));
             } else {
                 Err(RuntimeError::new("Invalid identifier.".to_string()))
             }
