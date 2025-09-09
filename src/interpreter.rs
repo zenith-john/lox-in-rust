@@ -123,7 +123,8 @@ pub fn execute(
                     if let Some(value) = val.as_bool() {
                         is_true = value;
                     } else {
-                        return Err(RuntimeError::new(line_number,
+                        return Err(RuntimeError::new(
+                            line_number,
                             "Statement in condition is not of bool type.".to_string(),
                         ));
                     }
@@ -428,19 +429,13 @@ fn unitary_eval(
     match token.ttype {
         TokenType::Minus => match right.as_number() {
             Some(x) => Ok(BasicType::Number(-x)),
-            _ => Err(RuntimeError::new(
-                line_number,
-                "Type mismatch.".to_string(),
-            )),
+            _ => Err(RuntimeError::new(line_number, "Type mismatch.".to_string())),
         },
         TokenType::Bang => {
             if let Some(x) = right.as_bool() {
                 Ok(BasicType::Bool(!x))
             } else {
-                Err(RuntimeError::new(
-                    line_number,
-                    "Type mismatch.".to_string(),
-                ))
+                Err(RuntimeError::new(line_number, "Type mismatch.".to_string()))
             }
         }
         _ => Err(RuntimeError::new(

@@ -7,7 +7,11 @@ use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 pub trait Callable {
-    fn call(&self, arguments: &mut LinkedList<BasicType>, line_number: i32) -> Result<BasicType, RuntimeError>;
+    fn call(
+        &self,
+        arguments: &mut LinkedList<BasicType>,
+        line_number: i32,
+    ) -> Result<BasicType, RuntimeError>;
     fn arity(&self) -> usize;
 }
 
@@ -50,9 +54,16 @@ impl Callable for LoxFunction {
     fn arity(&self) -> usize {
         self.params.len()
     }
-    fn call(&self, arguments: &mut LinkedList<BasicType>, line_number: i32) -> Result<BasicType, RuntimeError> {
+    fn call(
+        &self,
+        arguments: &mut LinkedList<BasicType>,
+        line_number: i32,
+    ) -> Result<BasicType, RuntimeError> {
         if self.arity() != arguments.len() {
-            return Err(RuntimeError::new(line_number, "Wrong argument number.".to_string()));
+            return Err(RuntimeError::new(
+                line_number,
+                "Wrong argument number.".to_string(),
+            ));
         }
         let env = Rc::new(RefCell::new(Environment::from(self.closure.clone())));
         for param in self.params.clone() {
@@ -118,7 +129,11 @@ impl LoxClass {
 }
 
 impl Callable for LoxClass {
-    fn call(&self, _arguments: &mut LinkedList<BasicType>, _: i32) -> Result<BasicType, RuntimeError> {
+    fn call(
+        &self,
+        _arguments: &mut LinkedList<BasicType>,
+        _: i32,
+    ) -> Result<BasicType, RuntimeError> {
         Ok(BasicType::Instance(Rc::new(RefCell::new(
             LoxInstance::new(Rc::new(self.clone())),
         ))))
