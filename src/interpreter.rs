@@ -50,7 +50,10 @@ pub fn execute(
                         .borrow_mut()
                         .define("super".to_string(), BasicType::Class(val));
                 } else {
-                    return Err(RuntimeError::new(format!("{} is not a class name.", expr)));
+                    return Err(RuntimeError::new(
+                        expr.line_number(),
+                        format!("{} is not a class name.", expr),
+                    ));
                 }
             }
             local_env = Rc::new(RefCell::new(Environment::from(local_env.clone())));
@@ -113,13 +116,14 @@ pub fn execute(
             else_branch,
         } => {
             let is_true: bool;
+            let line_number = condition.line_number();
             match evaluate(*condition, env.clone(), table) {
                 Err(e) => return Err(e),
                 Ok(val) => {
                     if let Some(value) = val.as_bool() {
                         is_true = value;
                     } else {
-                        return Err(RuntimeError::new(
+                        return Err(RuntimeError::new(line_number,
                             "Statement in condition is not of bool type.".to_string(),
                         ));
                     }
@@ -149,10 +153,10 @@ pub fn execute(
         Stmt::Var { name, initializer } => {
             if let Some(key) = name.lexeme.unwrap().as_string() {
                 if env.borrow().is_defined(key.to_string()) {
-                    return Err(RuntimeError::new(format!(
-                        "Multiple definition of some variable {}.",
-                        key
-                    )));
+                    return Err(RuntimeError::new(
+                        name.line,
+                        format!("Multiple definition of some variable {}.", key),
+                    ));
                 }
                 match initializer {
                     None => env.borrow_mut().define(key.clone(), BasicType::None),
@@ -166,7 +170,10 @@ pub fn execute(
                 };
                 Ok(())
             } else {
-                Err(RuntimeError::new("Invalid Variable Name".to_string()))
+                Err(RuntimeError::new(
+                    name.line,
+                    "Invalid Variable Name".to_string(),
+                ))
             }
         }
         Stmt::While { condition, body } => {
@@ -178,6 +185,7 @@ pub fn execute(
                         is_true = value;
                     } else {
                         return Err(RuntimeError::new(
+                            condition.line_number(),
                             "Statement in condition is not of bool type.".to_string(),
                         ));
                     }
@@ -192,6 +200,7 @@ pub fn execute(
                             is_true = value;
                         } else {
                             return Err(RuntimeError::new(
+                                condition.line_number(),
                                 "Statement in condition is not of bool type.".to_string(),
                             ));
                         }
@@ -208,6 +217,7 @@ pub fn evaluate(
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
 ) -> Result<BasicType, RuntimeError> {
+    let line_number = expr.line_number();
     match expr {
         Expr::Binary {
             left,
@@ -228,14 +238,14 @@ pub fn evaluate(
                 }
             }
             if let BasicType::Function(val) = callee_evaluated {
-                val.call(&mut args)
+                val.call(&mut args, line_number)
             } else if let BasicType::Class(val) = callee_evaluated {
-                val.call(&mut args)
+                val.call(&mut args, line_number)
             } else {
-                Err(RuntimeError::new(format!(
-                    "Callee {} is not a function.",
-                    callee_evaluated
-                )))
+                Err(RuntimeError::new(
+                    line_number,
+                    format!("Callee {} is not a function.", callee_evaluated),
+                ))
             }
         }
         Expr::Get { object, name } => {
@@ -257,13 +267,19 @@ pub fn evaluate(
                     }
                     match klass.superclass() {
                         None => {
-                            return Err(RuntimeError::new("Undefined property.".to_string()));
+                            return Err(RuntimeError::new(
+                                line_number,
+                                "Undefined property.".to_string(),
+                            ));
                         }
                         Some(val) => klass = val,
                     }
                 }
             } else {
-                Err(RuntimeError::new("Invalid property call.".to_string()))
+                Err(RuntimeError::new(
+                    line_number,
+                    "Invalid property call.".to_string(),
+                ))
             }
         }
         Expr::Grouping { expression } => evaluate(*expression, env, table),
@@ -281,6 +297,7 @@ pub fn evaluate(
                         is_true = value;
                     } else {
                         return Err(RuntimeError::new(
+                            line_number,
                             "Statement in condition is not of bool type.".to_string(),
                         ));
                     }
@@ -306,11 +323,14 @@ pub fn evaluate(
                 val.borrow_mut().set(name, v.clone());
                 Ok(v)
             } else {
-                Err(RuntimeError::new("Invalid property call.".to_string()))
+                Err(RuntimeError::new(
+                    line_number,
+                    "Invalid property call.".to_string(),
+                ))
             }
         }
         Expr::Super {
-            keyword,
+            keyword: _,
             method,
             id,
         } => {
@@ -318,6 +338,7 @@ pub fn evaluate(
             let superclass = match env.borrow_mut().get(&"super".to_string(), *depth) {
                 None => {
                     return Err(RuntimeError::new(
+                        line_number,
                         "Don't know what \"super\" referred to.".to_string(),
                     ));
                 }
@@ -326,6 +347,7 @@ pub fn evaluate(
             let object = match env.borrow_mut().get(&"this".to_string(), *depth - 1) {
                 None => {
                     return Err(RuntimeError::new(
+                        line_number,
                         "Don't know what \"this\" referred to.".to_string(),
                     ));
                 }
@@ -339,7 +361,10 @@ pub fn evaluate(
                 }
                 match klass.superclass() {
                     None => {
-                        return Err(RuntimeError::new("Undefined property.".to_string()));
+                        return Err(RuntimeError::new(
+                            line_number,
+                            "Undefined property.".to_string(),
+                        ));
                     }
                     Some(val) => klass = val,
                 }
@@ -349,6 +374,7 @@ pub fn evaluate(
             let depth = table.get(&id).expect("ID automatically generated.");
             match env.borrow_mut().get(&"this".to_string(), *depth) {
                 None => Err(RuntimeError::new(
+                    line_number,
                     "Don't know what \"this\" referred to.".to_string(),
                 )),
                 Some(val) => Ok(val),
@@ -359,11 +385,17 @@ pub fn evaluate(
             if let Some(key) = name.lexeme.unwrap().as_string() {
                 let depth = table.get(&id).expect("ID automatically generated.");
                 return match env.borrow_mut().get(&key, *depth) {
-                    None => Err(RuntimeError::new(format!("Undefined Variable {}.", key))),
+                    None => Err(RuntimeError::new(
+                        line_number,
+                        format!("Undefined Variable {}.", key),
+                    )),
                     Some(val) => Ok(val),
                 };
             } else {
-                Err(RuntimeError::new("Invalid identifier.".to_string()))
+                Err(RuntimeError::new(
+                    line_number,
+                    "Invalid identifier.".to_string(),
+                ))
             }
         }
         Expr::Assign { name, value, id } => {
@@ -375,7 +407,10 @@ pub fn evaluate(
                     .assign(key.clone(), val, *depth)
                     .expect("Always initialized."));
             } else {
-                Err(RuntimeError::new("Invalid identifier.".to_string()))
+                Err(RuntimeError::new(
+                    line_number,
+                    "Invalid identifier.".to_string(),
+                ))
             }
         }
     }
@@ -387,21 +422,31 @@ fn unitary_eval(
     env: Rc<RefCell<Environment>>,
     table: &HashMap<u64, i32>,
 ) -> Result<BasicType, RuntimeError> {
+    let line_number = expr.line_number();
     let right = evaluate(expr, env.clone(), table)?;
 
     match token.ttype {
         TokenType::Minus => match right.as_number() {
             Some(x) => Ok(BasicType::Number(-x)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(
+                line_number,
+                "Type mismatch.".to_string(),
+            )),
         },
         TokenType::Bang => {
             if let Some(x) = right.as_bool() {
                 Ok(BasicType::Bool(!x))
             } else {
-                Err(RuntimeError::new("Type mismatch.".to_string()))
+                Err(RuntimeError::new(
+                    line_number,
+                    "Type mismatch.".to_string(),
+                ))
             }
         }
-        _ => Err(RuntimeError::new("Unknown operator.".to_string())),
+        _ => Err(RuntimeError::new(
+            line_number,
+            "Unknown operator.".to_string(),
+        )),
     }
 }
 
@@ -418,15 +463,21 @@ fn binary_eval(
     match token.ttype {
         TokenType::Minus => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Number(x - y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
         TokenType::Slash => match (left.as_number(), right.as_number()) {
-            (Some(x), Some(y)) => divide(x, y),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            (Some(x), Some(y)) => {
+                if y == 0.0 {
+                    Err(RuntimeError::new(token.line, "Divide by 0.".to_string()))
+                } else {
+                    Ok(BasicType::Number(x / y))
+                }
+            }
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
         TokenType::Star => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Number(x * y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
         TokenType::Plus => {
             if let (Some(x), Some(y)) = (left.as_number(), right.as_number()) {
@@ -436,37 +487,32 @@ fn binary_eval(
             if let (Some(x), Some(y)) = (left.as_string(), right.as_string()) {
                 return Ok(BasicType::String(x.clone() + &*y));
             }
-            Err(RuntimeError::new("Type mismatch.".to_string()))
+            Err(RuntimeError::new(token.line, "Type mismatch.".to_string()))
         }
 
         TokenType::Greater => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Bool(x > y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
 
         TokenType::GreaterEqual => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Bool(x >= y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
 
         TokenType::Less => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Bool(x < y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
         TokenType::LessEqual => match (left.as_number(), right.as_number()) {
             (Some(x), Some(y)) => Ok(BasicType::Bool(x <= y)),
-            _ => Err(RuntimeError::new("Type mismatch.".to_string())),
+            _ => Err(RuntimeError::new(token.line, "Type mismatch.".to_string())),
         },
         TokenType::BangEqual => Ok(BasicType::Bool(!(left == right))),
         TokenType::EqualEqual => Ok(BasicType::Bool(left == right)),
-        _ => Err(RuntimeError::new("Unknown operator.".to_string())),
-    }
-}
-
-fn divide(numerator: f64, denominator: f64) -> Result<BasicType, RuntimeError> {
-    if denominator == 0.0 {
-        Err(RuntimeError::new("Divide by 0.".to_string()))
-    } else {
-        Ok(BasicType::Number(numerator / denominator))
+        _ => Err(RuntimeError::new(
+            token.line,
+            "Unknown operator.".to_string(),
+        )),
     }
 }

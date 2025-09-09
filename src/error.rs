@@ -40,14 +40,16 @@ impl ParseError {
 
 #[derive(Debug)]
 pub enum RuntimeError {
-    Reason(String),
+    Reason { line: i32, reason: String },
     ReturnValue(BasicType),
 }
 
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeError::Reason(s) => write!(f, "Runtime Error: {}", s),
+            RuntimeError::Reason { line, reason } => {
+                write!(f, "Runtime Error: Line {}, {}", line, reason)
+            }
             RuntimeError::ReturnValue(_s) => write!(f, "Uncaught return."),
         }
     }
@@ -55,7 +57,7 @@ impl std::fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 impl RuntimeError {
-    pub fn new(reason: String) -> RuntimeError {
-        RuntimeError::Reason(reason)
+    pub fn new(line: i32, reason: String) -> RuntimeError {
+        RuntimeError::Reason { line, reason }
     }
 }

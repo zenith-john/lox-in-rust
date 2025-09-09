@@ -7,7 +7,7 @@ use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 pub trait Callable {
-    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError>;
+    fn call(&self, arguments: &mut LinkedList<BasicType>, line_number: i32) -> Result<BasicType, RuntimeError>;
     fn arity(&self) -> usize;
 }
 
@@ -50,9 +50,9 @@ impl Callable for LoxFunction {
     fn arity(&self) -> usize {
         self.params.len()
     }
-    fn call(&self, arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError> {
+    fn call(&self, arguments: &mut LinkedList<BasicType>, line_number: i32) -> Result<BasicType, RuntimeError> {
         if self.arity() != arguments.len() {
-            return Err(RuntimeError::new("Wrong argument number.".to_string()));
+            return Err(RuntimeError::new(line_number, "Wrong argument number.".to_string()));
         }
         let env = Rc::new(RefCell::new(Environment::from(self.closure.clone())));
         for param in self.params.clone() {
@@ -60,9 +60,10 @@ impl Callable for LoxFunction {
                 (param.lexeme.expect("Well defined variables."))
                     .as_string()
                     .unwrap(),
-                arguments
-                    .pop_front()
-                    .ok_or(RuntimeError::new("Invalid Argument".to_string()))?,
+                arguments.pop_front().ok_or(RuntimeError::new(
+                    param.line,
+                    "Invalid Argument".to_string(),
+                ))?,
             );
         }
         for stmt in self.body.clone() {
@@ -70,12 +71,15 @@ impl Callable for LoxFunction {
                 Ok(()) => {}
                 Err(e) => match e {
                     RuntimeError::ReturnValue(e) => return Ok(e),
-                    _ => {
-                        return Err(RuntimeError::new(format!(
-                            "Error in function {}\n{}",
-                            self.name.lexeme.clone().unwrap(),
-                            e
-                        )))
+                    RuntimeError::Reason { line, reason } => {
+                        return Err(RuntimeError::new(
+                            line,
+                            format!(
+                                "Error in function {}\n{}",
+                                self.name.lexeme.clone().unwrap(),
+                                reason
+                            ),
+                        ))
                     }
                 },
             }
@@ -114,7 +118,7 @@ impl LoxClass {
 }
 
 impl Callable for LoxClass {
-    fn call(&self, _arguments: &mut LinkedList<BasicType>) -> Result<BasicType, RuntimeError> {
+    fn call(&self, _arguments: &mut LinkedList<BasicType>, _: i32) -> Result<BasicType, RuntimeError> {
         Ok(BasicType::Instance(Rc::new(RefCell::new(
             LoxInstance::new(Rc::new(self.clone())),
         ))))

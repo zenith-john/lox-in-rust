@@ -98,3 +98,46 @@ impl fmt::Display for Expr {
         }
     }
 }
+
+impl Expr {
+    pub fn line_number(&self) -> i32 {
+        match &self {
+            Expr::Binary {
+                left: _,
+                operator,
+                right: _,
+            } => operator.line,
+            Expr::Call {
+                callee: _,
+                paren,
+                arguments: _,
+            } => paren.line,
+            Expr::Get { object: _, name } => name.line,
+            Expr::Grouping { expression: _ } => -1,
+            Expr::Literal { value: _ } => -1,
+            Expr::Logical {
+                left: _,
+                operator,
+                right: _,
+            } => operator.line,
+            Expr::Set {
+                object: _,
+                name,
+                value: _,
+            } => name.line,
+            Expr::Super {
+                keyword,
+                method: _,
+                id: _,
+            } => keyword.line,
+            Expr::This { keyword, id: _ } => keyword.line,
+            Expr::Unary { operator, right: _ } => operator.line,
+            Expr::Variable { name, id: _ } => name.line,
+            Expr::Assign {
+                name,
+                value: _,
+                id: _,
+            } => name.line,
+        }
+    }
+}
