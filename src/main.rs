@@ -9,6 +9,7 @@ use std::process;
 use std::rc::Rc;
 
 mod callable;
+mod chunk;
 mod error;
 mod expr;
 mod interpreter;

@@ -145,10 +145,10 @@ pub fn execute(
             Err(e) => Err(e),
         },
         Stmt::Return { keyword: _, value } => match value {
-            None => return Err(RuntimeError::ReturnValue(BasicType::None)),
+            None => Err(RuntimeError::ReturnValue(BasicType::None)),
             Some(expr) => match evaluate(*expr, env.clone(), table) {
-                Ok(val) => return Err(RuntimeError::ReturnValue(val)),
-                Err(e) => return Err(e),
+                Ok(val) => Err(RuntimeError::ReturnValue(val)),
+                Err(e) => Err(e),
             },
         },
         Stmt::Var { name, initializer } => {
