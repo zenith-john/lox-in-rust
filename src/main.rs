@@ -18,6 +18,8 @@ mod resolver;
 mod scanner;
 mod stmt;
 mod token;
+mod vm;
+use crate::chunk::Chunk;
 use crate::error::RuntimeError;
 use crate::interpreter::interpret;
 use crate::parser::parser;
@@ -25,8 +27,21 @@ use crate::resolver::resolve;
 use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
+use crate::vm::VM;
 
 fn main() {
+    let mut chunk = Chunk::new();
+    chunk.add_constant(1.0);
+    chunk.add_constant(3.0);
+    chunk.write_chunk(1, 0);
+    chunk.write_chunk(0, 0);
+    chunk.write_chunk(1, 0);
+    chunk.write_chunk(1, 0);
+    chunk.write_chunk(2, 0);
+    chunk.write_chunk(3, 0);
+    chunk.write_chunk(0, 0);
+    let mut vm = VM::init();
+    let _ = vm.interpret(Box::new(chunk));
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");

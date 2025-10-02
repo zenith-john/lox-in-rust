@@ -1,10 +1,14 @@
-#[repr(u8)]
-enum Operation {
-    OpReturn = 0,
-    OpConstant = 1,
-    Default,
-}
-type Value = f64;
+use crate::error::RuntimeError;
+
+pub const OP_RETURN: u8 = 0;
+pub const OP_CONSTANT: u8 = 1;
+pub const OP_NEGATE: u8 = 2;
+pub const OP_ADD: u8 = 3;
+pub const OP_SUBTRACT: u8 = 4;
+pub const OP_MULTIPLY: u8 = 5;
+pub const OP_DIVIDE: u8 = 6;
+
+pub type Value = f64;
 
 struct ValueArray {
     values: Vec<Value>,
@@ -23,7 +27,8 @@ impl ValueArray {
         self.values[pos]
     }
 }
-struct Chunk {
+
+pub struct Chunk {
     code: Vec<u8>,
     constants: ValueArray,
     lines: Vec<i32>,
@@ -37,13 +42,34 @@ impl Chunk {
             lines: Vec::new(),
         }
     }
+
+    pub fn read_chunk(&self, pos: usize) -> Result<u8, RuntimeError> {
+        if pos >= self.code.len() {
+            Err(RuntimeError::Reason {
+                line: -1,
+                reason: "Index out of Chunk".to_string(),
+            })
+        } else {
+            Ok(self.code[pos])
+        }
+    }
+
+    pub fn read_line(&self, pos: usize) -> Result<i32, RuntimeError> {
+        if pos >= self.code.len() {
+            Err(RuntimeError::Reason {
+                line: -1,
+                reason: "Index out of Chunk".to_string(),
+            })
+        } else {
+            Ok(self.lines[pos])
+        }
+    }
+
     pub fn write_chunk(&mut self, byte: u8, line: i32) {
         self.code.push(byte);
         self.lines.push(line);
     }
-    pub fn capacity(&self) -> usize {
-        self.code.capacity()
-    }
+
     pub fn len(&self) -> usize {
         self.code.len()
     }
@@ -55,18 +81,34 @@ impl Chunk {
         }
     }
 
-    fn disassemble_instruction(&self, offset: usize) -> usize {
+    pub fn disassemble_instruction(&self, offset: usize) -> usize {
         let instruction: u8 = self.code[offset];
         match instruction {
-            0 => self.simple_instruction("OP_RETURN".to_string(), offset),
-            1 => self.constant_instruction("OP_CONSTANT".to_string(), offset),
+            OP_RETURN => self.simple_instruction("OP_RETURN".to_string(), offset),
+            OP_CONSTANT => self.constant_instruction("OP_CONSTANT".to_string(), offset),
+            OP_NEGATE => self.simple_instruction("OP_NEGATE".to_string(), offset),
+            OP_ADD => self.simple_instruction("OP_ADD".to_string(), offset),
+            OP_SUBTRACT => self.simple_instruction("OP_SUBTRACT".to_string(), offset),
+            OP_MULTIPLY => self.simple_instruction("OP_MULTIPLY".to_string(), offset),
+            OP_DIVIDE => self.simple_instruction("OP_DIVIDE".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }
         }
     }
 
-    fn add_constant(&mut self, val: Value) {
+    pub fn read_constant(&self, offset: usize) -> Result<Value, RuntimeError> {
+        if offset >= self.code.len() {
+            Err(RuntimeError::Reason {
+                line: -1,
+                reason: "Index out of Constant".to_string(),
+            })
+        } else {
+            Ok(self.constants.get_value(offset))
+        }
+    }
+
+    pub fn add_constant(&mut self, val: Value) {
         self.constants.write_value(val);
     }
 
@@ -88,12 +130,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chunk_new() {
-        let chunk = Chunk::new();
-        assert_eq!(chunk.capacity(), 0);
-    }
-
-    #[test]
     fn test_chunk_write() {
         let mut chunk = Chunk::new();
         chunk.write_chunk(1, 0);
@@ -109,7 +145,7 @@ mod tests {
         chunk.write_chunk(0, 1);
         chunk.write_chunk(1, 1);
         chunk.write_chunk(0, 1);
-        chunk.write_chunk(2, 1);
+        chunk.write_chunk(100, 1);
         chunk.disassemble_chunk();
     }
 }
