@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 mod callable;
 mod chunk;
+mod compile;
 mod error;
 mod expr;
 mod interpreter;
@@ -29,19 +30,10 @@ use crate::stmt::Environment;
 use crate::token::Token;
 use crate::vm::VM;
 
+const DEBUG: bool = true;
+
 fn main() {
-    let mut chunk = Chunk::new();
-    chunk.add_constant(1.0);
-    chunk.add_constant(3.0);
-    chunk.write_chunk(1, 0);
-    chunk.write_chunk(0, 0);
-    chunk.write_chunk(1, 0);
-    chunk.write_chunk(1, 0);
-    chunk.write_chunk(2, 0);
-    chunk.write_chunk(3, 0);
-    chunk.write_chunk(0, 0);
     let mut vm = VM::init();
-    let _ = vm.interpret(Box::new(chunk));
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");

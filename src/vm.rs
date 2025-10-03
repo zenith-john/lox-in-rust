@@ -1,8 +1,7 @@
 use crate::chunk;
 use crate::chunk::{Chunk, Value};
 use crate::error::RuntimeError;
-
-const DEBUG: bool = true;
+use crate::DEBUG;
 
 pub struct VM {
     vm: Box<Chunk>,

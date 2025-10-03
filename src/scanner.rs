@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use std::collections::{HashMap, LinkedList};
 
 lazy_static! {
-    static ref keywords: HashMap<String, TokenType> = HashMap::from([
+    pub static ref keywords: HashMap<String, TokenType> = HashMap::from([
         ("and".to_string(), TokenType::And),
         ("class".to_string(), TokenType::Class),
         ("else".to_string(), TokenType::Else),
@@ -262,8 +262,12 @@ fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
 
+fn is_alpha(c: char) -> bool {
+    matches!(c, 'a'..='z' | 'A'..='Z')
+}
+
 fn is_alpha_numeric(c: char) -> bool {
-    matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z')
+    matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_')
 }
 
 fn is_blank(c: char) -> bool {

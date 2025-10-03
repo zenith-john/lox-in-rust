@@ -39,7 +39,7 @@ pub enum TokenType {
     Else,
     False,
     Fun,
-    For,
+    For, // Not implemented
     If,
     Nil,
     Or,
