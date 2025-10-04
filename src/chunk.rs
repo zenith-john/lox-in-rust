@@ -19,8 +19,9 @@ impl ValueArray {
         ValueArray { values: Vec::new() }
     }
 
-    pub fn write_value(&mut self, val: Value) {
-        self.values.push(val)
+    pub fn write_value(&mut self, val: Value) -> usize {
+        self.values.push(val);
+        return self.values.len() - 1;
     }
 
     pub fn get_value(&self, pos: usize) -> Value {
@@ -108,8 +109,8 @@ impl Chunk {
         }
     }
 
-    pub fn add_constant(&mut self, val: Value) {
-        self.constants.write_value(val);
+    pub fn add_constant(&mut self, val: Value) -> usize {
+        self.constants.write_value(val)
     }
 
     fn simple_instruction(&self, name: String, offset: usize) -> usize {
