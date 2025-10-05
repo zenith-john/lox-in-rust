@@ -48,7 +48,7 @@ impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeError::Reason { line, reason } => {
-                write!(f, "Runtime Error: Line {}, {}", line, reason)
+                write!(f, "[Line {}] in script, Runtime Error: {}", line, reason)
             }
             RuntimeError::ReturnValue(_s) => write!(f, "Uncaught return."),
         }

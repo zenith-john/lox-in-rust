@@ -262,10 +262,6 @@ fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
 
-fn is_alpha(c: char) -> bool {
-    matches!(c, 'a'..='z' | 'A'..='Z')
-}
-
 fn is_alpha_numeric(c: char) -> bool {
     matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_')
 }

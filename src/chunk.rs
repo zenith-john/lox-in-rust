@@ -1,4 +1,5 @@
 use crate::error::RuntimeError;
+use crate::token::BasicType;
 
 pub const OP_RETURN: u8 = 0;
 pub const OP_CONSTANT: u8 = 1;
@@ -7,8 +8,15 @@ pub const OP_ADD: u8 = 3;
 pub const OP_SUBTRACT: u8 = 4;
 pub const OP_MULTIPLY: u8 = 5;
 pub const OP_DIVIDE: u8 = 6;
+pub const OP_NIL: u8 = 7;
+pub const OP_TRUE: u8 = 8;
+pub const OP_FALSE: u8 = 9;
+pub const OP_NOT: u8 = 10;
+pub const OP_EQUAL: u8 = 11;
+pub const OP_GREATER: u8 = 12;
+pub const OP_LESS: u8 = 13;
 
-pub type Value = f64;
+pub type Value = BasicType;
 
 struct ValueArray {
     values: Vec<Value>,
@@ -25,7 +33,8 @@ impl ValueArray {
     }
 
     pub fn get_value(&self, pos: usize) -> Value {
-        self.values[pos]
+        self.values[pos].clone()
+        // Hopefully remove clone in the future
     }
 }
 
@@ -92,6 +101,13 @@ impl Chunk {
             OP_SUBTRACT => self.simple_instruction("OP_SUBTRACT".to_string(), offset),
             OP_MULTIPLY => self.simple_instruction("OP_MULTIPLY".to_string(), offset),
             OP_DIVIDE => self.simple_instruction("OP_DIVIDE".to_string(), offset),
+            OP_NIL => self.simple_instruction("OP_NIL".to_string(), offset),
+            OP_TRUE => self.simple_instruction("OP_TRUE".to_string(), offset),
+            OP_FALSE => self.simple_instruction("OP_FALSE".to_string(), offset),
+            OP_NOT => self.simple_instruction("OP_NOT".to_string(), offset),
+            OP_EQUAL => self.simple_instruction("OP_EQUAL".to_string(), offset),
+            OP_GREATER => self.simple_instruction("OP_GREATER".to_string(), offset),
+            OP_LESS => self.simple_instruction("OP_LESS".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }
@@ -142,7 +158,7 @@ mod tests {
     #[should_panic = "Unknown code"]
     fn test_chunk_disassemble() {
         let mut chunk = Chunk::new();
-        chunk.add_constant(1.0);
+        chunk.add_constant(BasicType::Number(1.0));
         chunk.write_chunk(0, 1);
         chunk.write_chunk(1, 1);
         chunk.write_chunk(0, 1);

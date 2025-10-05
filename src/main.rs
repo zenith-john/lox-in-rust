@@ -20,7 +20,7 @@ mod scanner;
 mod stmt;
 mod token;
 mod vm;
-use crate::chunk::Chunk;
+use crate::compile::compile;
 use crate::error::RuntimeError;
 use crate::interpreter::interpret;
 use crate::parser::parser;
@@ -28,12 +28,11 @@ use crate::resolver::resolve;
 use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
-use crate::vm::VM;
 
 const DEBUG: bool = true;
 
 fn main() {
-    let mut vm = VM::init();
+    // compile("(3 + 4) - (5 - 1)");
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");

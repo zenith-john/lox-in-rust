@@ -1,6 +1,7 @@
 use crate::chunk::*;
 use crate::scanner::keywords;
-use crate::token::TokenType;
+use crate::token::{BasicType, TokenType};
+use crate::vm::VM;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -156,7 +157,7 @@ impl Scanner {
                 self.pos += 1;
                 return Ok(self.make_token(TokenType::String, start));
             }
-            '0'..'9' => {
+            '0'..='9' => {
                 while !self.is_at_end() && is_digit(self.peek()) {
                     self.advance();
                 }
@@ -168,7 +169,7 @@ impl Scanner {
                 }
                 return Ok(self.make_token(TokenType::Number, start));
             }
-            'a'..'z' | 'A'..'Z' | '_' => {
+            'a'..='z' | 'A'..='Z' | '_' => {
                 while !self.is_at_end() && is_alpha_numeric(self.peek()) {
                     self.advance();
                 }
@@ -245,8 +246,8 @@ impl Scanner {
     }
 }
 
-fn compile(src: &str) -> Result<(), ParseError> {
-    let mut scanner = Scanner::init_scanner(src);
+pub fn compile(src: &str) {
+    let scanner = Scanner::init_scanner(src);
     let mut parser = Parser {
         previous: NewToken {
             ttype: TokenType::Eof,
@@ -262,16 +263,13 @@ fn compile(src: &str) -> Result<(), ParseError> {
         },
         had_error: false,
         scanner: Box::new(scanner),
-        chunk: Chunk::new(),
+        chunk: Box::new(Chunk::new()),
     };
-    parser.advance()?;
-    parser.expression()?;
-    parser.expect(TokenType::Eof)?;
-    parser.emit_return();
-    if !parser.had_error {
-        parser.disassemble_chunk()
+    if let Err(e) = parser.parse() {
+        eprintln!("{}", e);
+    } else {
+        parser.run();
     }
-    Ok(())
 }
 
 struct Parser {
@@ -279,7 +277,7 @@ struct Parser {
     previous: NewToken,
     had_error: bool,
     scanner: Box<Scanner>,
-    chunk: Chunk,
+    chunk: Box<Chunk>,
 }
 
 impl Parser {
@@ -314,8 +312,8 @@ impl Parser {
     }
 
     fn number(&mut self) -> Result<(), ParseError> {
-        let value = self.get_string(self.previous).parse::<Value>().unwrap();
-        self.emit_constant(value)
+        let value = self.get_string(self.previous).parse::<f64>().unwrap();
+        self.emit_constant(BasicType::Number(value))
     }
 
     fn emit_constant(&mut self, val: Value) -> Result<(), ParseError> {
@@ -348,7 +346,9 @@ impl Parser {
         match op {
             TokenType::Minus => {
                 self.emit_byte(OP_NEGATE);
-                Ok(())
+            }
+            TokenType::Bang => {
+                self.emit_byte(OP_NOT);
             }
             _ => {
                 return Err(ParseError {
@@ -358,6 +358,7 @@ impl Parser {
                 })
             }
         }
+        Ok(())
     }
 
     fn binary(&mut self) -> Result<(), ParseError> {
@@ -370,11 +371,33 @@ impl Parser {
             TokenType::Minus => self.emit_byte(OP_SUBTRACT),
             TokenType::Star => self.emit_byte(OP_MULTIPLY),
             TokenType::Slash => self.emit_byte(OP_DIVIDE),
+            TokenType::BangEqual => self.emit_bytes(OP_EQUAL, OP_NOT),
+            TokenType::EqualEqual => self.emit_byte(OP_EQUAL),
+            TokenType::Greater => self.emit_byte(OP_GREATER),
+            TokenType::GreaterEqual => self.emit_bytes(OP_LESS, OP_NOT),
+            TokenType::Less => self.emit_byte(OP_LESS),
+            TokenType::LessEqual => self.emit_bytes(OP_GREATER, OP_NOT),
             _ => {
                 return Err(ParseError {
                     line: self.previous.line,
                     token: self.get_string(self.previous),
                     reason: format!("{:?} is not a binary operator.", self.previous.ttype),
+                })
+            }
+        }
+        Ok(())
+    }
+
+    fn literal(&mut self) -> Result<(), ParseError> {
+        match self.previous.ttype {
+            TokenType::False => self.emit_byte(OP_FALSE),
+            TokenType::Nil => self.emit_byte(OP_NIL),
+            TokenType::True => self.emit_byte(OP_TRUE),
+            _ => {
+                return Err(ParseError {
+                    line: self.previous.line,
+                    token: self.get_string(self.previous),
+                    reason: format!("{:?} expect expression.", self.previous.ttype),
                 })
             }
         }
@@ -390,7 +413,8 @@ impl Parser {
         match self.previous.ttype {
             TokenType::LeftParen => self.grouping(),
             TokenType::Number => self.number(),
-            TokenType::Minus => self.unary(),
+            TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::False | TokenType::True | TokenType::Nil => self.literal(),
             _ => Err(ParseError {
                 line: self.previous.line,
                 token: self.get_string(self.previous),
@@ -401,9 +425,16 @@ impl Parser {
         while prec <= get_precedence(self.current.ttype) {
             self.advance()?;
             match self.previous.ttype {
-                TokenType::Minus | TokenType::Plus | TokenType::Slash | TokenType::Star => {
-                    self.binary()
-                }
+                TokenType::Minus
+                | TokenType::Plus
+                | TokenType::Slash
+                | TokenType::Star
+                | TokenType::BangEqual
+                | TokenType::EqualEqual
+                | TokenType::Greater
+                | TokenType::GreaterEqual
+                | TokenType::Less
+                | TokenType::LessEqual => self.binary(),
                 _ => Ok(()),
             }?
         }
@@ -433,14 +464,26 @@ impl Parser {
     fn disassemble_chunk(&self) {
         self.chunk.disassemble_chunk();
     }
+
+    fn parse(&mut self) -> Result<(), ParseError> {
+        self.advance()?;
+        self.expression()?;
+        self.expect(TokenType::Eof)?;
+        self.emit_return();
+        if !self.had_error {
+            self.disassemble_chunk()
+        }
+        Ok(())
+    }
+
+    fn run(&self) {
+        let mut vm = VM::init(&self.chunk);
+        vm.interpret(&self.chunk);
+    }
 }
 
 fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
-}
-
-fn is_alpha(c: char) -> bool {
-    matches!(c, 'a'..='z' | 'A'..='Z')
 }
 
 fn is_alpha_numeric(c: char) -> bool {
@@ -451,6 +494,10 @@ fn get_precedence(ttype: TokenType) -> Prec {
     match ttype {
         TokenType::Minus | TokenType::Plus => Prec::Term,
         TokenType::Slash | TokenType::Star => Prec::Factor,
+        TokenType::BangEqual | TokenType::EqualEqual => Prec::Equality,
+        TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => {
+            Prec::Comparison
+        }
         _ => Prec::None,
     }
 }
@@ -468,6 +515,17 @@ mod tests {
     fn test_compile_prec2() {
         let _ = compile("1 - (2 - 3) * 4");
     }
+
+    #[test]
+    fn test_bool() {
+        let _ = compile("true");
+    }
+
+    // #[test]
+    // #[should_panic = "True is not number"]
+    // fn test_type_mismatch() {
+    //     let _ = compile("- true");
+    // }
 
     #[test]
     fn test_compile() {
