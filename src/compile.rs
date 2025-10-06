@@ -2,6 +2,7 @@ use crate::chunk::*;
 use crate::scanner::keywords;
 use crate::token::{BasicType, TokenType};
 use crate::vm::VM;
+use crate::DEBUG;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -261,9 +262,7 @@ pub fn compile(src: &str) {
         scanner: Box::new(scanner),
         chunk: Box::new(Chunk::new()),
     };
-    if let Err(e) = parser.parse() {
-        eprintln!("{}", e);
-    } else {
+    if !parser.parse() {
         parser.run();
     }
 }
@@ -279,19 +278,9 @@ struct Parser {
 impl Parser {
     fn advance(&mut self) -> Result<(), ParseError> {
         self.previous = self.current;
-        // loop {
-        match self.scanner.scan_token() {
-            Ok(token) => {
-                self.current = token;
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("{}", e);
-                self.had_error = true;
-                Err(e)
-            }
-        }
-        // }
+        let token = self.scanner.scan_token()?;
+        self.current = token;
+        Ok(())
     }
 
     fn emit_byte(&mut self, byte: u8) {
@@ -329,6 +318,61 @@ impl Parser {
             });
         }
         Ok(pos as u8)
+    }
+
+    fn declaration(&mut self) -> Result<(), ParseError> {
+        if self.match_advance(TokenType::Var) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<(), ParseError> {
+        let global: u8 = self.parse_variable()?;
+        if self.match_advance(TokenType::Equal) {
+            self.expression()?;
+        } else {
+            self.emit_byte(OP_NIL);
+        }
+        self.expect(TokenType::Semicolon)?;
+        self.define_variable(global)
+    }
+
+    fn parse_variable(&mut self) -> Result<u8, ParseError> {
+        self.expect(TokenType::Identifier)?;
+        self.identifier_constant()
+    }
+
+    fn identifier_constant(&mut self) -> Result<u8, ParseError> {
+        self.make_constant(BasicType::String(self.get_string(self.previous)))
+    }
+
+    fn define_variable(&mut self, id: u8) -> Result<(), ParseError> {
+        self.emit_bytes(OP_DEFINE_GLOBAL, id);
+        Ok(())
+    }
+
+    fn statement(&mut self) -> Result<(), ParseError> {
+        if self.match_advance(TokenType::Print) {
+            self.print_statement()
+        } else {
+            self.expression_statement()
+        }
+    }
+
+    fn expression_statement(&mut self) -> Result<(), ParseError> {
+        self.expression()?;
+        self.expect(TokenType::Semicolon)?;
+        self.emit_byte(OP_POP);
+        Ok(())
+    }
+
+    fn print_statement(&mut self) -> Result<(), ParseError> {
+        self.expression()?;
+        self.expect(TokenType::Semicolon)?;
+        self.emit_byte(OP_PRINT);
+        Ok(())
     }
 
     fn grouping(&mut self) -> Result<(), ParseError> {
@@ -409,14 +453,32 @@ impl Parser {
         self.emit_constant(BasicType::String(string[1..string.len() - 1].to_string()))
     }
 
+    fn variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
+        self.named_variable(can_assign)
+    }
+
+    fn named_variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
+        let arg = self.identifier_constant()?;
+
+        if can_assign && self.match_advance(TokenType::Equal) {
+            self.expression()?;
+            self.emit_bytes(OP_SET_GLOBAL, arg);
+        } else {
+            self.emit_bytes(OP_GET_GLOBAL, arg);
+        }
+        Ok(())
+    }
+
     fn parse_precedence(&mut self, prec: Prec) -> Result<(), ParseError> {
         self.advance()?;
+        let can_assign = prec <= Prec::Assignment;
         match self.previous.ttype {
             TokenType::LeftParen => self.grouping(),
             TokenType::Number => self.number(),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::False | TokenType::True | TokenType::Nil => self.literal(),
             TokenType::String => self.string(),
+            TokenType::Identifier => self.variable(can_assign),
             _ => Err(ParseError {
                 line: self.previous.line,
                 token: self.get_string(self.previous),
@@ -440,6 +502,13 @@ impl Parser {
                 _ => Ok(()),
             }?
         }
+        if can_assign && self.is_match(TokenType::Equal) {
+            return Err(ParseError {
+                line: self.previous.line,
+                token: self.get_string(self.current),
+                reason: "Invalid assignment statement.".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -452,14 +521,24 @@ impl Parser {
             self.advance()?;
             Ok(())
         } else {
-            let e = ParseError {
+            Err(ParseError {
                 line: self.current.line,
                 token: self.get_string(self.current),
                 reason: format!("Expected {:?} but get {:?}", ttype, self.current.ttype),
-            };
-            self.had_error = true;
-            eprintln!("{}", e);
-            Err(e)
+            })
+        }
+    }
+
+    fn is_match(&mut self, ttype: TokenType) -> bool {
+        self.current.ttype == ttype
+    }
+
+    fn match_advance(&mut self, ttype: TokenType) -> bool {
+        if !self.is_match(ttype) {
+            false
+        } else {
+            let _ = self.advance(); // May not the desired behavior
+            true
         }
     }
 
@@ -467,15 +546,48 @@ impl Parser {
         self.chunk.disassemble_chunk();
     }
 
-    fn parse(&mut self) -> Result<(), ParseError> {
-        self.advance()?;
-        self.expression()?;
-        self.expect(TokenType::Eof)?;
-        self.emit_return();
-        if !self.had_error {
-            self.disassemble_chunk()
+    fn synchronize(&mut self) {
+        while self.current.ttype != TokenType::Eof {
+            if self.previous.ttype == TokenType::Semicolon {
+                return;
+            }
+            match self.current.ttype {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => {
+                    let _ = self.advance();
+                }
+            }
         }
-        Ok(())
+    }
+
+    fn handle_result(&mut self, res: Result<(), ParseError>) {
+        if let Err(e) = res {
+            self.had_error = true;
+            eprintln!("{}", e);
+            let _ = self.advance();
+            self.synchronize();
+        }
+    }
+
+    fn parse(&mut self) -> bool {
+        let res = self.advance();
+        self.handle_result(res);
+        while !self.match_advance(TokenType::Eof) {
+            let res = self.declaration();
+            self.handle_result(res);
+        }
+        self.emit_return();
+        if DEBUG && !self.had_error {
+            self.disassemble_chunk();
+        }
+        self.had_error
     }
 
     fn run(&self) {
@@ -510,31 +622,36 @@ mod tests {
 
     #[test]
     fn test_compile_prec1() {
-        let _ = compile("1 + 2 - 3 * 4");
+        let _ = compile("1 + 2 - 3 * 4;");
     }
 
     #[test]
     fn test_compile_prec2() {
-        let _ = compile("1 - (2 - 3) * 4");
+        let _ = compile("1 - (2 - 3) * 4;");
     }
 
     #[test]
     fn test_bool() {
-        let _ = compile("true");
+        let _ = compile("true;");
     }
 
     #[test]
     fn test_type_mismatch() {
-        let _ = compile("- true");
+        let _ = compile("- true;");
+    }
+
+    #[test]
+    fn test_invalid_assignment() {
+        let _ = compile("var a = 1;\nvar b = 2;\na * b = 3;");
     }
 
     #[test]
     fn test_string_concatenation() {
-        let _ = compile("\"test\" + \"output\"");
+        let _ = compile("\"test\" + \"output\";");
     }
 
     #[test]
     fn test_compile() {
-        let _ = compile("var x = 1;\nvar y = 2;\nwhile(x <= 3)\n {\n x = x + y;\n}\n");
+        let _ = compile("var x = \"test\";\nvar y = \"output\";\nprint x + y;\n");
     }
 }

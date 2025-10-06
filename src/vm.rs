@@ -4,10 +4,13 @@ use crate::error::RuntimeError;
 use crate::token::BasicType;
 use crate::DEBUG;
 
+use std::collections::HashMap;
+
 pub struct VM<'a> {
     vm: &'a Chunk,
     ip: usize,
     stack: Vec<Value>,
+    globals: HashMap<String, Value>,
 }
 
 macro_rules! binary_op {
@@ -50,6 +53,7 @@ impl<'a> VM<'a> {
             vm: chunk,
             ip: 0,
             stack: Vec::new(),
+            globals: HashMap::new(),
         }
     }
 
@@ -93,7 +97,7 @@ impl<'a> VM<'a> {
             let op = self.read_chunk()?;
             match op {
                 chunk::OP_RETURN => {
-                    println!("{}", self.pop());
+                    // println!("{}", self.pop());
                     return Ok(());
                 }
                 chunk::OP_CONSTANT => {
@@ -170,16 +174,75 @@ impl<'a> VM<'a> {
                 chunk::OP_LESS => {
                     binary_op_bool!(self, <)
                 }
+                chunk::OP_PRINT => {
+                    println!("{}", self.pop());
+                }
+                chunk::OP_POP => {
+                    self.pop();
+                }
+                chunk::OP_DEFINE_GLOBAL => {
+                    let offset = self.read_chunk()?;
+                    let constant = self.vm.read_constant(offset as usize)?;
+                    if let Some(name) = constant.as_string() {
+                        let val = self.peek(0);
+                        self.globals.insert(name, val);
+                        self.pop();
+                    } else {
+                        return Err(RuntimeError::Reason {
+                            reason: format!("{} is not a variable name.", constant),
+                            line: self.vm.read_line(self.ip - 1)?,
+                        });
+                    }
+                }
+                chunk::OP_GET_GLOBAL => {
+                    let offset = self.read_chunk()?;
+                    let constant = self.vm.read_constant(offset as usize)?;
+                    if let Some(name) = constant.as_string() {
+                        if let Some(val) = self.globals.get(&name) {
+                            self.push(val.clone());
+                        } else {
+                            return Err(RuntimeError::Reason {
+                                reason: format!("Variable {} is not defined.", constant),
+                                line: self.vm.read_line(self.ip - 1)?,
+                            });
+                        }
+                    } else {
+                        return Err(RuntimeError::Reason {
+                            reason: format!("{} is not a variable name.", constant),
+                            line: self.vm.read_line(self.ip - 1)?,
+                        });
+                    }
+                }
+                chunk::OP_SET_GLOBAL => {
+                    let offset = self.read_chunk()?;
+                    let constant = self.vm.read_constant(offset as usize)?;
+                    if let Some(name) = constant.as_string() {
+                        let val = self.peek(0);
+                        self.pop();
+                        if self.globals.insert(name.clone(), val).is_none() {
+                            self.globals.remove(&name);
+                            return Err(RuntimeError::Reason {
+                                reason: format!("{} is not defined before assignment.", constant),
+                                line: self.vm.read_line(self.ip - 1)?,
+                            });
+                        }
+                    } else {
+                        return Err(RuntimeError::Reason {
+                            reason: format!("{} is not a variable name.", constant),
+                            line: self.vm.read_line(self.ip - 1)?,
+                        });
+                    }
+                }
                 _ => {
                     return Err(RuntimeError::Reason {
-                        reason: "Unknown command".to_string(),
+                        reason: "Unknown command.".to_string(),
                         line: self.vm.read_line(self.ip - 1)?,
                     })
                 }
             }
         }
         Err(RuntimeError::Reason {
-            reason: "Don't find return command".to_string(),
+            reason: "Don't find return command.".to_string(),
             line: -1,
         })
     }

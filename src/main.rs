@@ -29,10 +29,12 @@ use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 fn main() {
-    compile("(3 + 4) - (5 - 1)");
+    if DEBUG {
+        compile("var x = 1;\nvar y = 2;\nprint x + y;\n");
+    }
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");

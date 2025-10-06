@@ -15,6 +15,11 @@ pub const OP_NOT: u8 = 10;
 pub const OP_EQUAL: u8 = 11;
 pub const OP_GREATER: u8 = 12;
 pub const OP_LESS: u8 = 13;
+pub const OP_PRINT: u8 = 14;
+pub const OP_POP: u8 = 15;
+pub const OP_DEFINE_GLOBAL: u8 = 16;
+pub const OP_GET_GLOBAL: u8 = 17;
+pub const OP_SET_GLOBAL: u8 = 18;
 
 pub type Value = BasicType;
 
@@ -108,6 +113,11 @@ impl Chunk {
             OP_EQUAL => self.simple_instruction("OP_EQUAL".to_string(), offset),
             OP_GREATER => self.simple_instruction("OP_GREATER".to_string(), offset),
             OP_LESS => self.simple_instruction("OP_LESS".to_string(), offset),
+            OP_PRINT => self.simple_instruction("OP_PRINT".to_string(), offset),
+            OP_POP => self.simple_instruction("OP_POP".to_string(), offset),
+            OP_DEFINE_GLOBAL => self.constant_instruction("OP_DEFINE_GLOBAL".to_string(), offset),
+            OP_GET_GLOBAL => self.constant_instruction("OP_GET_GLOBAL".to_string(), offset),
+            OP_SET_GLOBAL => self.constant_instruction("OP_SET_GLOBAL".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }
