@@ -32,7 +32,7 @@ use crate::token::Token;
 const DEBUG: bool = true;
 
 fn main() {
-    // compile("(3 + 4) - (5 - 1)");
+    compile("(3 + 4) - (5 - 1)");
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");

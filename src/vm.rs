@@ -46,11 +46,11 @@ macro_rules! binary_op_bool {
 
 impl<'a> VM<'a> {
     pub fn init(chunk: &'a Chunk) -> VM<'a> {
-        return VM {
+        VM {
             vm: chunk,
             ip: 0,
             stack: Vec::new(),
-        };
+        }
     }
 
     pub fn reset_stack(&mut self) {
@@ -62,11 +62,11 @@ impl<'a> VM<'a> {
     }
 
     pub fn pop(&mut self) -> Value {
-        return self.stack.pop().expect("Pop from empty stack");
+        self.stack.pop().expect("Pop from empty stack")
     }
 
     pub fn peek(&mut self, distance: usize) -> Value {
-        return self.stack[self.stack.len() - 1 - distance].clone();
+        self.stack[self.stack.len() - 1 - distance].clone()
         // Hopefully remove clone in the future
     }
 
@@ -84,11 +84,11 @@ impl<'a> VM<'a> {
         while self.ip < self.vm.len() {
             if DEBUG {
                 self.vm.disassemble_instruction(self.ip);
-                println!("");
+                println!();
                 for val in &self.stack {
                     print!("[ {} ]", val);
                 }
-                println!("");
+                println!();
             }
             let op = self.read_chunk()?;
             match op {
@@ -114,7 +114,23 @@ impl<'a> VM<'a> {
                     }
                 }
                 chunk::OP_ADD => {
-                    binary_op!(self, +);
+                    if let (Some(a), Some(b)) = (self.peek(0).as_number(), self.peek(1).as_number())
+                    {
+                        self.pop();
+                        self.pop();
+                        self.push(BasicType::Number(b + a));
+                    } else if let (Some(a), Some(b)) =
+                        (self.peek(0).as_string(), self.peek(1).as_string())
+                    {
+                        self.pop();
+                        self.pop();
+                        self.push(BasicType::String(b + &a))
+                    } else {
+                        return Err(RuntimeError::Reason {
+                            line: self.vm.read_line(self.ip - 1)?,
+                            reason: "Operands must be numbers.".to_string(),
+                        });
+                    }
                 }
                 chunk::OP_SUBTRACT => {
                     binary_op!(self, -);
@@ -162,10 +178,10 @@ impl<'a> VM<'a> {
                 }
             }
         }
-        return Err(RuntimeError::Reason {
+        Err(RuntimeError::Reason {
             reason: "Don't find return command".to_string(),
             line: -1,
-        });
+        })
     }
 
     fn read_chunk(&mut self) -> Result<u8, RuntimeError> {

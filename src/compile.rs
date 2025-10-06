@@ -33,7 +33,7 @@ impl Prec {
 
 impl PartialOrd for Prec {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.as_u8().cmp(&other.as_u8()))
+        Some(self.cmp(other))
     }
 }
 
@@ -51,11 +51,7 @@ pub struct ParseError {
 }
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[line {}] at {}: {}\n",
-            self.line, self.token, self.reason
-        )
+        writeln!(f, "[line {}] at {}: {}", self.line, self.token, self.reason)
     }
 }
 impl std::error::Error for ParseError {}
@@ -86,7 +82,7 @@ impl Scanner {
     }
 
     fn is_at_end(&self) -> bool {
-        return self.pos == self.length;
+        self.pos == self.length
     }
 
     fn scan_token(&mut self) -> Result<NewToken, ParseError> {
@@ -175,7 +171,7 @@ impl Scanner {
                 }
                 let text: String = self.source[start..self.pos].iter().collect();
                 let ttype: TokenType = match keywords.get(&text) {
-                    Some(i) => i.clone(),
+                    Some(i) => *i,
                     None => TokenType::Identifier,
                 };
 
@@ -183,15 +179,15 @@ impl Scanner {
             }
             _ => {}
         }
-        return Err(ParseError {
+        Err(ParseError {
             line: self.line,
             token: self.source[start..self.pos].iter().collect(),
             reason: "Unknown Error".to_string(),
-        });
+        })
     }
 
     fn peek(&self) -> char {
-        return self.source[self.pos];
+        self.source[self.pos]
     }
 
     fn skip_whitespace(&mut self) {
@@ -229,16 +225,16 @@ impl Scanner {
             return false;
         }
         self.pos += 1;
-        return true;
+        true
     }
 
     fn make_token(&self, ttype: TokenType, start: usize) -> NewToken {
-        return NewToken {
-            ttype: ttype,
-            start: start,
+        NewToken {
+            ttype,
+            start,
             length: (self.pos - start) as i32,
             line: self.line,
-        };
+        }
     }
 
     fn get_string(&self, start: usize, length: i32) -> String {
@@ -283,19 +279,19 @@ struct Parser {
 impl Parser {
     fn advance(&mut self) -> Result<(), ParseError> {
         self.previous = self.current;
-        loop {
-            match self.scanner.scan_token() {
-                Ok(token) => {
-                    self.current = token;
-                    return Ok(());
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    self.had_error = true;
-                    return Err(e);
-                }
-            };
+        // loop {
+        match self.scanner.scan_token() {
+            Ok(token) => {
+                self.current = token;
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                self.had_error = true;
+                Err(e)
+            }
         }
+        // }
     }
 
     fn emit_byte(&mut self, byte: u8) {
@@ -332,7 +328,7 @@ impl Parser {
                 reason: "Too many constants".to_string(),
             });
         }
-        return Ok(pos as u8);
+        Ok(pos as u8)
     }
 
     fn grouping(&mut self) -> Result<(), ParseError> {
@@ -408,6 +404,11 @@ impl Parser {
         self.parse_precedence(Prec::Assignment)
     }
 
+    fn string(&mut self) -> Result<(), ParseError> {
+        let string = self.get_string(self.previous);
+        self.emit_constant(BasicType::String(string[1..string.len() - 1].to_string()))
+    }
+
     fn parse_precedence(&mut self, prec: Prec) -> Result<(), ParseError> {
         self.advance()?;
         match self.previous.ttype {
@@ -415,6 +416,7 @@ impl Parser {
             TokenType::Number => self.number(),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::False | TokenType::True | TokenType::Nil => self.literal(),
+            TokenType::String => self.string(),
             _ => Err(ParseError {
                 line: self.previous.line,
                 token: self.get_string(self.previous),
@@ -448,7 +450,7 @@ impl Parser {
     fn expect(&mut self, ttype: TokenType) -> Result<(), ParseError> {
         if self.current.ttype == ttype {
             self.advance()?;
-            return Ok(());
+            Ok(())
         } else {
             let e = ParseError {
                 line: self.current.line,
@@ -457,7 +459,7 @@ impl Parser {
             };
             self.had_error = true;
             eprintln!("{}", e);
-            return Err(e);
+            Err(e)
         }
     }
 
@@ -521,11 +523,15 @@ mod tests {
         let _ = compile("true");
     }
 
-    // #[test]
-    // #[should_panic = "True is not number"]
-    // fn test_type_mismatch() {
-    //     let _ = compile("- true");
-    // }
+    #[test]
+    fn test_type_mismatch() {
+        let _ = compile("- true");
+    }
+
+    #[test]
+    fn test_string_concatenation() {
+        let _ = compile("\"test\" + \"output\"");
+    }
 
     #[test]
     fn test_compile() {

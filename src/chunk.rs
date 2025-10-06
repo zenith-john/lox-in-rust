@@ -29,7 +29,7 @@ impl ValueArray {
 
     pub fn write_value(&mut self, val: Value) -> usize {
         self.values.push(val);
-        return self.values.len() - 1;
+        self.values.len() - 1
     }
 
     pub fn get_value(&self, pos: usize) -> Value {

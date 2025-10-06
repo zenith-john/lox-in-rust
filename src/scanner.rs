@@ -242,7 +242,7 @@ fn scan_token(string: &str, pos: usize, line: &mut i32) -> Result<(Token, usize)
             }
             let text = string[pos..end + 1].to_string();
             let ttype: TokenType = match keywords.get(&text) {
-                Some(i) => i.clone(),
+                Some(i) => *i,
                 None => TokenType::Identifier,
             };
             Token {
