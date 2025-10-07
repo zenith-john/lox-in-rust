@@ -2,7 +2,7 @@ use crate::chunk;
 use crate::chunk::{Chunk, Value};
 use crate::error::RuntimeError;
 use crate::token::BasicType;
-use crate::DEBUG;
+use crate::{DEBUG, USIZE};
 
 use std::collections::HashMap;
 
@@ -218,7 +218,6 @@ impl<'a> VM<'a> {
                     let constant = self.vm.read_constant(offset as usize)?;
                     if let Some(name) = constant.as_string() {
                         let val = self.peek(0);
-                        self.pop();
                         if self.globals.insert(name.clone(), val).is_none() {
                             self.globals.remove(&name);
                             return Err(RuntimeError::Reason {
@@ -233,6 +232,33 @@ impl<'a> VM<'a> {
                         });
                     }
                 }
+                chunk::OP_GET_LOCAL => {
+                    let offset = self.read_chunk()?;
+                    self.push(self.stack[offset as usize].clone());
+                }
+                chunk::OP_SET_LOCAL => {
+                    let offset = self.read_chunk()?;
+                    self.stack[offset as usize] = self.peek(0);
+                }
+                chunk::OP_JUMP_IF_FALSE => {
+                    let offset = self.read_jump()?;
+                    let is_false = match self.peek(0) {
+                        BasicType::None => true,
+                        BasicType::Bool(x) => !x,
+                        _ => false,
+                    };
+                    if is_false {
+                        self.ip += offset;
+                    }
+                }
+                chunk::OP_JUMP => {
+                    let offset = self.read_jump()?;
+                    self.ip += offset;
+                }
+                chunk::OP_LOOP => {
+                    let offset = self.read_jump()?;
+                    self.ip -= offset;
+                }
                 _ => {
                     return Err(RuntimeError::Reason {
                         reason: "Unknown command.".to_string(),
@@ -245,6 +271,12 @@ impl<'a> VM<'a> {
             reason: "Don't find return command.".to_string(),
             line: -1,
         })
+    }
+
+    fn read_jump(&mut self) -> Result<usize, RuntimeError> {
+        let ret = self.vm.read_jump(self.ip)?;
+        self.ip += USIZE;
+        Ok(ret)
     }
 
     fn read_chunk(&mut self) -> Result<u8, RuntimeError> {

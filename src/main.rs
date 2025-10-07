@@ -29,7 +29,8 @@ use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
 
-const DEBUG: bool = false;
+const USIZE: usize = std::mem::size_of::<usize>();
+const DEBUG: bool = true;
 
 fn main() {
     if DEBUG {

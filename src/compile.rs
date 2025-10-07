@@ -2,7 +2,7 @@ use crate::chunk::*;
 use crate::scanner::keywords;
 use crate::token::{BasicType, TokenType};
 use crate::vm::VM;
-use crate::DEBUG;
+use crate::{DEBUG, USIZE};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -261,6 +261,7 @@ pub fn compile(src: &str) {
         had_error: false,
         scanner: Box::new(scanner),
         chunk: Box::new(Chunk::new()),
+        scope: Scope::init(),
     };
     if !parser.parse() {
         parser.run();
@@ -273,6 +274,7 @@ struct Parser {
     had_error: bool,
     scanner: Box<Scanner>,
     chunk: Box<Chunk>,
+    scope: Scope,
 }
 
 impl Parser {
@@ -297,7 +299,7 @@ impl Parser {
     }
 
     fn number(&mut self) -> Result<(), ParseError> {
-        let value = self.get_string(self.previous).parse::<f64>().unwrap();
+        let value = self.get_string(&self.previous).parse::<f64>().unwrap();
         self.emit_constant(BasicType::Number(value))
     }
 
@@ -313,7 +315,7 @@ impl Parser {
         if pos >= 256 {
             return Err(ParseError {
                 line: self.previous.line,
-                token: self.get_string(self.previous),
+                token: self.get_string(&self.previous),
                 reason: "Too many constants".to_string(),
             });
         }
@@ -341,24 +343,167 @@ impl Parser {
 
     fn parse_variable(&mut self) -> Result<u8, ParseError> {
         self.expect(TokenType::Identifier)?;
+
+        self.declare_variable()?;
+        if self.scope.depth > 0 {
+            return Ok(0);
+        }
+
         self.identifier_constant()
     }
 
+    fn declare_variable(&mut self) -> Result<(), ParseError> {
+        if self.scope.depth == 0 {
+            return Ok(());
+        }
+
+        let name = &self.previous;
+        for i in (0..self.scope.locals.len()).rev() {
+            if self.scope.depth != -1 && self.scope.locals[i].depth < self.scope.depth {
+                break;
+            }
+            if self.identifier_equal(name, &self.scope.locals[i].name) {
+                return Err(ParseError {
+                    line: self.previous.line,
+                    token: self.get_string(&self.previous),
+                    reason: "A variable with same name defined in this scope".to_string(),
+                });
+            }
+        }
+        self.add_local(*name)
+    }
+
+    fn identifier_equal(&self, token1: &NewToken, token2: &NewToken) -> bool {
+        self.get_string(token1) == self.get_string(token2)
+    }
+
+    fn add_local(&mut self, token: NewToken) -> Result<(), ParseError> {
+        self.scope.locals.push(Local {
+            name: token,
+            depth: -1,
+        });
+        Ok(())
+    }
+
     fn identifier_constant(&mut self) -> Result<u8, ParseError> {
-        self.make_constant(BasicType::String(self.get_string(self.previous)))
+        self.make_constant(BasicType::String(self.get_string(&self.previous)))
     }
 
     fn define_variable(&mut self, id: u8) -> Result<(), ParseError> {
+        if self.scope.depth > 0 {
+            self.make_initialized();
+            return Ok(());
+        }
         self.emit_bytes(OP_DEFINE_GLOBAL, id);
         Ok(())
+    }
+
+    fn make_initialized(&mut self) {
+        let len = self.scope.locals.len();
+        self.scope.locals[len - 1].depth = self.scope.depth;
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope.depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope.depth -= 1;
+
+        for i in (0..self.scope.locals.len()).rev() {
+            if self.scope.locals[i].depth > self.scope.depth {
+                self.emit_byte(OP_POP);
+                self.scope.locals.pop();
+            } else {
+                return;
+            }
+        }
     }
 
     fn statement(&mut self) -> Result<(), ParseError> {
         if self.match_advance(TokenType::Print) {
             self.print_statement()
+        } else if self.match_advance(TokenType::If) {
+            self.if_statement()
+        } else if self.match_advance(TokenType::While) {
+            self.while_statement()
+        } else if self.match_advance(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block()?;
+            self.end_scope();
+            Ok(())
         } else {
             self.expression_statement()
         }
+    }
+
+    fn if_statement(&mut self) -> Result<(), ParseError> {
+        self.expect(TokenType::LeftParen)?;
+        self.expression()?;
+        self.expect(TokenType::RightParen)?;
+
+        let then_jump = self.emit_jump(OP_JUMP_IF_FALSE)?;
+        self.emit_byte(OP_POP);
+        self.statement()?;
+
+        if self.match_advance(TokenType::Else) {
+            let else_jump = self.emit_jump(OP_JUMP)?;
+            self.patch_jump(then_jump)?;
+            self.emit_byte(OP_POP);
+            self.statement()?;
+            self.patch_jump(else_jump)?;
+        } else {
+            self.patch_jump(then_jump)?;
+        }
+        Ok(())
+    }
+
+    fn emit_jump(&mut self, op: u8) -> Result<usize, ParseError> {
+        self.emit_byte(op);
+        for _ in 0..USIZE {
+            self.emit_byte(0xff);
+        }
+        Ok(self.chunk.len() - USIZE)
+    }
+
+    fn emit_loop(&mut self, start: usize) -> Result<(), ParseError> {
+        self.emit_byte(OP_LOOP);
+        let offset = self.chunk.len() - start + USIZE;
+        for byte in offset.to_ne_bytes() {
+            self.emit_byte(byte);
+        }
+        Ok(())
+    }
+
+    fn patch_jump(&mut self, offset: usize) -> Result<(), ParseError> {
+        let jump = self.chunk.len() - offset - USIZE;
+        let bytes = jump.to_ne_bytes();
+        for (i, &byte) in bytes.iter().enumerate() {
+            self.chunk.modify_chunk(offset + i, byte);
+        }
+        Ok(())
+    }
+
+    fn while_statement(&mut self) -> Result<(), ParseError> {
+        let start = self.chunk.len();
+        self.expect(TokenType::LeftParen)?;
+        self.expression()?;
+        self.expect(TokenType::RightParen)?;
+        let exit_jump = self.emit_jump(OP_JUMP_IF_FALSE)?;
+        self.emit_byte(OP_POP);
+        self.statement()?;
+        self.emit_loop(start)?;
+        self.patch_jump(exit_jump)?;
+        self.emit_byte(OP_POP);
+        Ok(())
+    }
+
+    fn block(&mut self) -> Result<(), ParseError> {
+        while (!self.is_match(TokenType::RightBrace)) && (!self.is_match(TokenType::Eof)) {
+            self.declaration()?;
+        }
+
+        self.expect(TokenType::RightBrace)
     }
 
     fn expression_statement(&mut self) -> Result<(), ParseError> {
@@ -392,8 +537,8 @@ impl Parser {
             }
             _ => {
                 return Err(ParseError {
-                    line: self.current.line,
-                    token: self.get_string(self.previous),
+                    line: self.previous.line,
+                    token: self.get_string(&self.previous),
                     reason: format!("{:?} is not an unary operator.", self.previous.ttype),
                 })
             }
@@ -420,7 +565,7 @@ impl Parser {
             _ => {
                 return Err(ParseError {
                     line: self.previous.line,
-                    token: self.get_string(self.previous),
+                    token: self.get_string(&self.previous),
                     reason: format!("{:?} is not a binary operator.", self.previous.ttype),
                 })
             }
@@ -436,7 +581,7 @@ impl Parser {
             _ => {
                 return Err(ParseError {
                     line: self.previous.line,
-                    token: self.get_string(self.previous),
+                    token: self.get_string(&self.previous),
                     reason: format!("{:?} expect expression.", self.previous.ttype),
                 })
             }
@@ -449,7 +594,7 @@ impl Parser {
     }
 
     fn string(&mut self) -> Result<(), ParseError> {
-        let string = self.get_string(self.previous);
+        let string = self.get_string(&self.previous);
         self.emit_constant(BasicType::String(string[1..string.len() - 1].to_string()))
     }
 
@@ -457,14 +602,46 @@ impl Parser {
         self.named_variable(can_assign)
     }
 
+    fn resolve_local(&mut self) -> Result<Option<u8>, ParseError> {
+        for i in (0..self.scope.locals.len()).rev() {
+            if self.identifier_equal(&self.previous, &self.scope.locals[i].name) {
+                if self.scope.locals[i].depth == -1 {
+                    return Err(ParseError {
+                        line: self.previous.line,
+                        token: self.get_string(&self.previous),
+                        reason: "Can't read local variable in its own identifier".to_string(),
+                    });
+                }
+                return Ok(Some(i as u8));
+            }
+        }
+        Ok(None)
+    }
+
     fn named_variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
-        let arg = self.identifier_constant()?;
+        let arg = self.resolve_local()?;
+        let get_op = if arg.is_none() {
+            OP_GET_GLOBAL
+        } else {
+            OP_GET_LOCAL
+        };
+        let set_op = if arg.is_none() {
+            OP_SET_GLOBAL
+        } else {
+            OP_SET_LOCAL
+        };
+
+        let pos = if let Some(u) = arg {
+            u
+        } else {
+            self.identifier_constant()?
+        };
 
         if can_assign && self.match_advance(TokenType::Equal) {
             self.expression()?;
-            self.emit_bytes(OP_SET_GLOBAL, arg);
+            self.emit_bytes(set_op, pos);
         } else {
-            self.emit_bytes(OP_GET_GLOBAL, arg);
+            self.emit_bytes(get_op, pos);
         }
         Ok(())
     }
@@ -481,7 +658,7 @@ impl Parser {
             TokenType::Identifier => self.variable(can_assign),
             _ => Err(ParseError {
                 line: self.previous.line,
-                token: self.get_string(self.previous),
+                token: self.get_string(&self.previous),
                 reason: format!("{:?} expect expression.", self.previous.ttype),
             }),
         }?;
@@ -499,20 +676,38 @@ impl Parser {
                 | TokenType::GreaterEqual
                 | TokenType::Less
                 | TokenType::LessEqual => self.binary(),
+                TokenType::And => self.and(),
+                TokenType::Or => self.or(),
                 _ => Ok(()),
             }?
         }
         if can_assign && self.is_match(TokenType::Equal) {
             return Err(ParseError {
                 line: self.previous.line,
-                token: self.get_string(self.current),
+                token: self.get_string(&self.current),
                 reason: "Invalid assignment statement.".to_string(),
             });
         }
         Ok(())
     }
 
-    fn get_string(&self, token: NewToken) -> String {
+    fn and(&mut self) -> Result<(), ParseError> {
+        let end_jump = self.emit_jump(OP_JUMP_IF_FALSE)?;
+        self.emit_byte(OP_POP);
+        self.parse_precedence(Prec::And)?;
+        self.patch_jump(end_jump)
+    }
+
+    fn or(&mut self) -> Result<(), ParseError> {
+        let else_jump = self.emit_jump(OP_JUMP_IF_FALSE)?;
+        let end_jump = self.emit_jump(OP_JUMP)?;
+        self.patch_jump(else_jump)?;
+        self.emit_byte(OP_POP);
+        self.parse_precedence(Prec::Or)?;
+        self.patch_jump(end_jump)
+    }
+
+    fn get_string(&self, token: &NewToken) -> String {
         self.scanner.get_string(token.start, token.length)
     }
 
@@ -523,7 +718,7 @@ impl Parser {
         } else {
             Err(ParseError {
                 line: self.current.line,
-                token: self.get_string(self.current),
+                token: self.get_string(&self.current),
                 reason: format!("Expected {:?} but get {:?}", ttype, self.current.ttype),
             })
         }
@@ -596,6 +791,25 @@ impl Parser {
     }
 }
 
+struct Local {
+    name: NewToken,
+    depth: i32,
+}
+
+struct Scope {
+    pub locals: Vec<Local>,
+    pub depth: i32,
+}
+
+impl Scope {
+    fn init() -> Scope {
+        Scope {
+            locals: Vec::new(),
+            depth: 0,
+        }
+    }
+}
+
 fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
@@ -612,6 +826,8 @@ fn get_precedence(ttype: TokenType) -> Prec {
         TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => {
             Prec::Comparison
         }
+        TokenType::And => Prec::And,
+        TokenType::Or => Prec::Or,
         _ => Prec::None,
     }
 }
@@ -653,5 +869,26 @@ mod tests {
     #[test]
     fn test_compile() {
         let _ = compile("var x = \"test\";\nvar y = \"output\";\nprint x + y;\n");
+    }
+
+    #[test]
+    fn test_local_variable() {
+        let _ =
+            compile("var x = 1;\n{\nvar x = 2;\nprint x;\nvar y=2;\nprint x + y;\n}\nprint x;\n");
+    }
+
+    #[test]
+    fn test_while_statement() {
+        let _ = compile("var x = 1;\nvar y = 5;\nwhile (x <= y)\n{\nprint x;\nx = x + 1;\n}\n");
+    }
+
+    #[test]
+    fn test_if_statement() {
+        let _ = compile("var x = true;\nvar y = false;\nif (x or y)\n print \"Correct\";\nelse\nprint \"Wrong\";\n");
+    }
+
+    #[test]
+    fn test_if_statement2() {
+        let _ = compile("var x = true;\nvar y = false;\nif (x and y)\n print \"Wrong\";\nelse\nprint \"Correct\";\n");
     }
 }

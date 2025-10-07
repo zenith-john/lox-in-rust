@@ -1,5 +1,6 @@
 use crate::error::RuntimeError;
 use crate::token::BasicType;
+use crate::USIZE;
 
 pub const OP_RETURN: u8 = 0;
 pub const OP_CONSTANT: u8 = 1;
@@ -20,6 +21,11 @@ pub const OP_POP: u8 = 15;
 pub const OP_DEFINE_GLOBAL: u8 = 16;
 pub const OP_GET_GLOBAL: u8 = 17;
 pub const OP_SET_GLOBAL: u8 = 18;
+pub const OP_GET_LOCAL: u8 = 19;
+pub const OP_SET_LOCAL: u8 = 20;
+pub const OP_JUMP_IF_FALSE: u8 = 21;
+pub const OP_JUMP: u8 = 22;
+pub const OP_LOOP: u8 = 23;
 
 pub type Value = BasicType;
 
@@ -69,6 +75,18 @@ impl Chunk {
         }
     }
 
+    pub fn read_jump(&self, pos: usize) -> Result<usize, RuntimeError> {
+        let mut bytes: [u8; USIZE] = [0; USIZE];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = self.read_chunk(pos + i)?;
+        }
+        Ok(usize::from_ne_bytes(bytes))
+    }
+
+    pub fn modify_chunk(&mut self, pos: usize, byte: u8) {
+        self.code[pos] = byte;
+    }
+
     pub fn read_line(&self, pos: usize) -> Result<i32, RuntimeError> {
         if pos >= self.code.len() {
             Err(RuntimeError::Reason {
@@ -94,6 +112,7 @@ impl Chunk {
         while offset < self.len() {
             offset = self.disassemble_instruction(offset);
         }
+        println!();
     }
 
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
@@ -118,6 +137,11 @@ impl Chunk {
             OP_DEFINE_GLOBAL => self.constant_instruction("OP_DEFINE_GLOBAL".to_string(), offset),
             OP_GET_GLOBAL => self.constant_instruction("OP_GET_GLOBAL".to_string(), offset),
             OP_SET_GLOBAL => self.constant_instruction("OP_SET_GLOBAL".to_string(), offset),
+            OP_GET_LOCAL => self.byte_instruction("OP_GET_LOCAL".to_string(), offset),
+            OP_SET_LOCAL => self.byte_instruction("OP_SET_LOCAL".to_string(), offset),
+            OP_JUMP_IF_FALSE => self.jump_instruction("OP_JUMP_IF_FALSE".to_string(), offset),
+            OP_JUMP => self.jump_instruction("OP_JUMP".to_string(), offset),
+            OP_LOOP => self.loop_instruction("OP_LOOP".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }
@@ -140,15 +164,32 @@ impl Chunk {
     }
 
     fn simple_instruction(&self, name: String, offset: usize) -> usize {
-        println!("{}", name);
+        println!("[{}] {}", offset, name);
         offset + 1
     }
 
     fn constant_instruction(&self, name: String, offset: usize) -> usize {
         let pos = self.code[offset + 1];
         let val = self.constants.get_value(pos as usize);
-        println!("{} {}", name, val);
+        println!("[{}] {} {}", offset, name, val);
         offset + 2
+    }
+
+    fn byte_instruction(&self, name: String, offset: usize) -> usize {
+        println!("[{}] {} {}", offset, name, self.code[offset + 1]);
+        offset + 2
+    }
+
+    fn jump_instruction(&self, name: String, offset: usize) -> usize {
+        let address = self.read_jump(offset + 1).expect("Can not get address");
+        println!("[{}] {} -> {}", offset, name, offset + USIZE + 1 + address);
+        offset + 1 + USIZE
+    }
+
+    fn loop_instruction(&self, name: String, offset: usize) -> usize {
+        let address = self.read_jump(offset + 1).expect("Can not get address");
+        println!("[{}] {} -> {}", offset, name, offset + USIZE + 1 - address);
+        offset + 1 + USIZE
     }
 }
 
