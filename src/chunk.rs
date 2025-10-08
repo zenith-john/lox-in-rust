@@ -27,6 +27,9 @@ pub const OP_JUMP_IF_FALSE: u8 = 21;
 pub const OP_JUMP: u8 = 22;
 pub const OP_LOOP: u8 = 23;
 pub const OP_CALL: u8 = 24;
+pub const OP_CLASS: u8 = 25;
+pub const OP_GET_PROPERTY: u8 = 26;
+pub const OP_SET_PROPERTY: u8 = 27;
 
 pub type Value = LoxType;
 
@@ -146,6 +149,9 @@ impl Chunk {
             OP_JUMP => self.jump_instruction("OP_JUMP".to_string(), offset),
             OP_LOOP => self.loop_instruction("OP_LOOP".to_string(), offset),
             OP_CALL => self.byte_instruction("OP_CALL".to_string(), offset),
+            OP_CLASS => self.constant_instruction("OP_CLASS".to_string(), offset),
+            OP_GET_PROPERTY => self.byte_instruction("OP_GET_PROPERTY".to_string(), offset),
+            OP_SET_PROPERTY => self.byte_instruction("OP_SET_PROPERTY".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }

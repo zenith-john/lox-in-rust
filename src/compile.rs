@@ -328,14 +328,25 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<(), ParseError> {
-        if self.match_advance(TokenType::Fun) {
-            return self.fun_declaration();
-        }
-        if self.match_advance(TokenType::Var) {
+        if self.match_advance(TokenType::Class) {
+            self.class_declaration()
+        } else if self.match_advance(TokenType::Fun) {
+            self.fun_declaration()
+        } else if self.match_advance(TokenType::Var) {
             self.var_declaration()
         } else {
             self.statement()
         }
+    }
+
+    fn class_declaration(&mut self) -> Result<(), ParseError> {
+        self.expect(TokenType::Identifier)?;
+        let constant = self.identifier_constant()?;
+        self.declare_variable()?;
+        self.emit_bytes(OP_CLASS, constant);
+        self.define_variable(constant)?;
+        self.expect(TokenType::LeftBrace)?;
+        self.expect(TokenType::RightBrace)
     }
 
     fn fun_declaration(&mut self) -> Result<(), ParseError> {
@@ -750,6 +761,7 @@ impl Parser {
                 TokenType::And => self.and(),
                 TokenType::Or => self.or(),
                 TokenType::LeftParen => self.call(),
+                TokenType::Dot => self.dot(can_assign),
                 _ => Ok(()),
             }?
         }
@@ -759,6 +771,19 @@ impl Parser {
                 token: self.get_string(&self.current),
                 reason: "Invalid assignment statement.".to_string(),
             });
+        }
+        Ok(())
+    }
+
+    fn dot(&mut self, can_assign: bool) -> Result<(), ParseError> {
+        self.expect(TokenType::Identifier)?;
+        let pos = self.identifier_constant()?;
+
+        if can_assign && self.match_advance(TokenType::Equal) {
+            self.expression()?;
+            self.emit_bytes(OP_SET_PROPERTY, pos);
+        } else {
+            self.emit_bytes(OP_GET_PROPERTY, pos);
         }
         Ok(())
     }
@@ -925,7 +950,7 @@ fn get_precedence(ttype: TokenType) -> Prec {
         TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => {
             Prec::Comparison
         }
-        TokenType::LeftParen => Prec::Call,
+        TokenType::LeftParen | TokenType::Dot => Prec::Call,
         TokenType::And => Prec::And,
         TokenType::Or => Prec::Or,
         _ => Prec::None,
@@ -935,65 +960,77 @@ fn get_precedence(ttype: TokenType) -> Prec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::VM;
+
+    fn run(content: &str) {
+        let mut vm = VM::init();
+        if let Some(function) = compile(content) {
+            vm.interpret(function);
+        }
+    }
 
     #[test]
     fn test_compile_prec1() {
-        let _ = compile("1 + 2 - 3 * 4;");
+        let _ = run("1 + 2 - 3 * 4;");
     }
 
     #[test]
     fn test_compile_prec2() {
-        let _ = compile("1 - (2 - 3) * 4;");
+        let _ = run("1 - (2 - 3) * 4;");
     }
 
     #[test]
     fn test_bool() {
-        let _ = compile("true;");
+        let _ = run("true;");
     }
 
     #[test]
     fn test_type_mismatch() {
-        let _ = compile("- true;");
+        let _ = run("- true;");
     }
 
     #[test]
     fn test_invalid_assignment() {
-        let _ = compile("var a = 1;\nvar b = 2;\na * b = 3;");
+        let _ = run("var a = 1;\nvar b = 2;\na * b = 3;");
     }
 
     #[test]
     fn test_string_concatenation() {
-        let _ = compile("\"test\" + \"output\";");
+        let _ = run("\"test\" + \"output\";");
     }
 
     #[test]
     fn test_compile() {
-        let _ = compile("var x = \"test\";\nvar y = \"output\";\nprint x + y;\n");
+        let _ = run("var x = \"test\";\nvar y = \"output\";\nprint x + y;\n");
     }
 
     #[test]
     fn test_local_variable() {
-        let _ =
-            compile("var x = 1;\n{\nvar x = 2;\nprint x;\nvar y=2;\nprint x + y;\n}\nprint x;\n");
+        let _ = run("var x = 1;\n{\nvar x = 2;\nprint x;\nvar y=2;\nprint x + y;\n}\nprint x;\n");
     }
 
     #[test]
     fn test_while_statement() {
-        let _ = compile("var x = 1;\nvar y = 5;\nwhile (x <= y)\n{\nprint x;\nx = x + 1;\n}\n");
+        let _ = run("var x = 1;\nvar y = 5;\nwhile (x <= y)\n{\nprint x;\nx = x + 1;\n}\n");
     }
 
     #[test]
     fn test_if_statement() {
-        let _ = compile("var x = true;\nvar y = false;\nif (x or y)\n print \"Correct\";\nelse\nprint \"Wrong\";\n");
+        let _ = run("var x = true;\nvar y = false;\nif (x or y)\n print \"Correct\";\nelse\nprint \"Wrong\";\n");
     }
 
     #[test]
     fn test_if_statement2() {
-        let _ = compile("var x = true;\nvar y = false;\nif (x and y)\n print \"Wrong\";\nelse\nprint \"Correct\";\n");
+        let _ = run("var x = true;\nvar y = false;\nif (x and y)\n print \"Wrong\";\nelse\nprint \"Correct\";\n");
     }
 
     #[test]
     fn test_fun_statement() {
-        let _ = compile("fun hello(x)\n{\n print x;\n print \"Hello world\";\n}\n hello(1);\n");
+        let _ = run("fun hello(x)\n{\n print x;\n print \"Hello world\";\n}\n hello(1);\n");
+    }
+
+    #[test]
+    fn test_class_without_method() {
+        let _ = run("class Pair {}\n var pair = Pair();\npair.first = 1;\npair.second = 2;\nprint pair.first + pair.second;\n");
     }
 }

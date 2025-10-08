@@ -34,7 +34,7 @@ use crate::vm::VM;
 
 const USIZE: usize = std::mem::size_of::<usize>();
 const BACKTRACE: bool = true;
-const DEBUG: bool = false;
+const DEBUG: bool = true;
 const NEW: bool = true;
 
 fn main() {

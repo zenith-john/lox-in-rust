@@ -1,6 +1,6 @@
 use crate::chunk;
 use crate::chunk::Value;
-use crate::object::{Function, LoxType};
+use crate::object::{Class, Function, Instance, LoxType};
 use crate::{BACKTRACE, DEBUG, USIZE};
 
 use std::cell::RefCell;
@@ -313,11 +313,92 @@ impl VM {
                     chunk::OP_CALL => {
                         let cnt = current.read_chunk()?;
                         let func = self.peek(cnt as usize).clone(); // Hopefully, remove this clone in the future.
-                        if let Err(mut e) = self.call_value(&func, cnt) {
-                            e.line = current.read_line()?;
-                            return Err(e);
-                        };
+                        match func {
+                            LoxType::Function(func) => {
+                                if let Err(mut e) = self.call(func, cnt) {
+                                    e.line = current.read_line()?;
+                                    return Err(e);
+                                };
+                            }
+                            LoxType::Class(klass) => {
+                                self.pop();
+                                self.stack.push(LoxType::Instance(Rc::new(RefCell::new(
+                                    Instance::new(klass.clone()),
+                                ))));
+                            }
+                            _ => {
+                                return Err(RuntimeError {
+                                    reason: "Variable is not callable.".to_string(),
+                                    line: current.read_line()?,
+                                })
+                            }
+                        }
                         break;
+                    }
+                    chunk::OP_CLASS => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?.as_string();
+                        if let Some(name) = constant {
+                            self.push(LoxType::Class(Rc::new(Class { name })));
+                        } else {
+                            return Err(RuntimeError {
+                                reason: "Class name should be a string.".to_string(),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_GET_PROPERTY => {
+                        let instance = self.pop();
+                        if let LoxType::Instance(ins) = instance {
+                            let offset = current.read_chunk()?;
+                            let constant = current.read_constant(offset as usize)?;
+
+                            if let Some(name) = constant.as_string() {
+                                let inst = ins.borrow();
+                                if let Some(val) = inst.fields.get(&name) {
+                                    self.push(val.clone());
+                                } else {
+                                    return Err(RuntimeError {
+                                        reason: format!("Property {} is not defined.", constant),
+                                        line: current.read_line()?,
+                                    });
+                                }
+                            } else {
+                                return Err(RuntimeError {
+                                    reason: format!("{} is not a property name.", constant),
+                                    line: current.read_line()?,
+                                });
+                            }
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("{} is not an instance.", instance),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_SET_PROPERTY => {
+                        let instance = self.peek(1);
+                        if let LoxType::Instance(ins) = instance {
+                            let offset = current.read_chunk()?;
+                            let constant = current.read_constant(offset as usize)?;
+                            if let Some(name) = constant.as_string() {
+                                let val = self.peek(0).clone();
+                                ins.borrow_mut().fields.insert(name.clone(), val.clone());
+                                self.pop();
+                                self.pop();
+                                self.push(val);
+                            } else {
+                                return Err(RuntimeError {
+                                    reason: format!("{} is not a property name.", constant),
+                                    line: current.read_line()?,
+                                });
+                            }
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("{} is not an instance.", instance),
+                                line: current.read_line()?,
+                            });
+                        }
                     }
                     _ => {
                         return Err(RuntimeError {
@@ -329,16 +410,6 @@ impl VM {
             }
         }
         Ok(())
-    }
-
-    fn call_value(&mut self, fun: &Value, arg_cnt: u8) -> Result<(), RuntimeError> {
-        match fun {
-            LoxType::Function(func) => self.call(func.clone(), arg_cnt),
-            _ => Err(RuntimeError {
-                reason: "Variable is not callable.".to_string(),
-                line: -1,
-            }),
-        }
     }
 
     fn call(&mut self, fun: Rc<Function>, arg_cnt: u8) -> Result<(), RuntimeError> {

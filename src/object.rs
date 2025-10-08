@@ -1,4 +1,6 @@
 use crate::chunk::Chunk;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,6 +11,8 @@ pub enum LoxType {
     Number(f64),
     Bool(bool),
     Function(Rc<Function>),
+    Class(Rc<Class>),
+    Instance(Rc<RefCell<Instance>>),
 }
 
 impl LoxType {
@@ -36,6 +40,8 @@ impl fmt::Display for LoxType {
             LoxType::Number(n) => write!(f, "{}", n),
             LoxType::Bool(b) => write!(f, "{}", b),
             LoxType::Function(l) => write!(f, "{}", l.name),
+            LoxType::Class(l) => write!(f, "{}", l.name),
+            LoxType::Instance(i) => write!(f, "Instance of {}", i.borrow().klass.name),
             LoxType::None => write!(f, "Nil"),
         }
     }
@@ -62,4 +68,24 @@ pub struct Function {
     pub arity: u8,
     pub chunk: Box<Chunk>,
     pub name: String,
+}
+
+#[derive(Clone)]
+pub struct Class {
+    pub name: String,
+}
+
+#[derive(Clone)]
+pub struct Instance {
+    pub klass: Rc<Class>,
+    pub fields: HashMap<String, LoxType>,
+}
+
+impl Instance {
+    pub fn new(klass: Rc<Class>) -> Instance {
+        Instance {
+            klass,
+            fields: HashMap::new(),
+        }
+    }
 }
