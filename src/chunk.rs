@@ -1,5 +1,5 @@
-use crate::error::RuntimeError;
-use crate::token::BasicType;
+use crate::object::LoxType;
+use crate::vm::RuntimeError;
 use crate::USIZE;
 
 pub const OP_RETURN: u8 = 0;
@@ -26,9 +26,11 @@ pub const OP_SET_LOCAL: u8 = 20;
 pub const OP_JUMP_IF_FALSE: u8 = 21;
 pub const OP_JUMP: u8 = 22;
 pub const OP_LOOP: u8 = 23;
+pub const OP_CALL: u8 = 24;
 
-pub type Value = BasicType;
+pub type Value = LoxType;
 
+#[derive(Clone)]
 struct ValueArray {
     values: Vec<Value>,
 }
@@ -49,6 +51,7 @@ impl ValueArray {
     }
 }
 
+#[derive(Clone)]
 pub struct Chunk {
     code: Vec<u8>,
     constants: ValueArray,
@@ -66,7 +69,7 @@ impl Chunk {
 
     pub fn read_chunk(&self, pos: usize) -> Result<u8, RuntimeError> {
         if pos >= self.code.len() {
-            Err(RuntimeError::Reason {
+            Err(RuntimeError {
                 line: -1,
                 reason: "Index out of Chunk".to_string(),
             })
@@ -89,7 +92,7 @@ impl Chunk {
 
     pub fn read_line(&self, pos: usize) -> Result<i32, RuntimeError> {
         if pos >= self.code.len() {
-            Err(RuntimeError::Reason {
+            Err(RuntimeError {
                 line: -1,
                 reason: "Index out of Chunk".to_string(),
             })
@@ -112,7 +115,7 @@ impl Chunk {
         while offset < self.len() {
             offset = self.disassemble_instruction(offset);
         }
-        println!();
+        eprintln!();
     }
 
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
@@ -142,6 +145,7 @@ impl Chunk {
             OP_JUMP_IF_FALSE => self.jump_instruction("OP_JUMP_IF_FALSE".to_string(), offset),
             OP_JUMP => self.jump_instruction("OP_JUMP".to_string(), offset),
             OP_LOOP => self.loop_instruction("OP_LOOP".to_string(), offset),
+            OP_CALL => self.byte_instruction("OP_CALL".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }
@@ -150,7 +154,7 @@ impl Chunk {
 
     pub fn read_constant(&self, offset: usize) -> Result<Value, RuntimeError> {
         if offset >= self.code.len() {
-            Err(RuntimeError::Reason {
+            Err(RuntimeError {
                 line: -1,
                 reason: "Index out of Constant".to_string(),
             })
@@ -164,31 +168,31 @@ impl Chunk {
     }
 
     fn simple_instruction(&self, name: String, offset: usize) -> usize {
-        println!("[{}] {}", offset, name);
+        eprintln!("[{}] {}", offset, name);
         offset + 1
     }
 
     fn constant_instruction(&self, name: String, offset: usize) -> usize {
         let pos = self.code[offset + 1];
         let val = self.constants.get_value(pos as usize);
-        println!("[{}] {} {}", offset, name, val);
+        eprintln!("[{}] {} {}", offset, name, val);
         offset + 2
     }
 
     fn byte_instruction(&self, name: String, offset: usize) -> usize {
-        println!("[{}] {} {}", offset, name, self.code[offset + 1]);
+        eprintln!("[{}] {} {}", offset, name, self.code[offset + 1]);
         offset + 2
     }
 
     fn jump_instruction(&self, name: String, offset: usize) -> usize {
         let address = self.read_jump(offset + 1).expect("Can not get address");
-        println!("[{}] {} -> {}", offset, name, offset + USIZE + 1 + address);
+        eprintln!("[{}] {} -> {}", offset, name, offset + USIZE + 1 + address);
         offset + 1 + USIZE
     }
 
     fn loop_instruction(&self, name: String, offset: usize) -> usize {
         let address = self.read_jump(offset + 1).expect("Can not get address");
-        println!("[{}] {} -> {}", offset, name, offset + USIZE + 1 - address);
+        eprintln!("[{}] {} -> {}", offset, name, offset + USIZE + 1 - address);
         offset + 1 + USIZE
     }
 }
@@ -209,7 +213,7 @@ mod tests {
     #[should_panic = "Unknown code"]
     fn test_chunk_disassemble() {
         let mut chunk = Chunk::new();
-        chunk.add_constant(BasicType::Number(1.0));
+        chunk.add_constant(LoxType::Number(1.0));
         chunk.write_chunk(0, 1);
         chunk.write_chunk(1, 1);
         chunk.write_chunk(0, 1);

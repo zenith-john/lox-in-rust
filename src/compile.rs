@@ -1,10 +1,12 @@
 use crate::chunk::*;
+use crate::object::{Function, LoxType};
 use crate::scanner::keywords;
-use crate::token::{BasicType, TokenType};
-use crate::vm::VM;
+use crate::token::TokenType;
 use crate::{DEBUG, USIZE};
+
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, FromPrimitive, PartialEq, Eq)]
 pub enum Prec {
@@ -139,7 +141,7 @@ impl Scanner {
             }
             '"' => {
                 while self.peek() != '"' && !self.is_at_end() {
-                    if self.peek() != '\n' {
+                    if self.peek() == '\n' {
                         self.line += 1;
                     }
                     self.pos += 1
@@ -243,7 +245,7 @@ impl Scanner {
     }
 }
 
-pub fn compile(src: &str) {
+pub fn compile(src: &str) -> Option<Rc<Function>> {
     let scanner = Scanner::init_scanner(src);
     let mut parser = Parser {
         previous: NewToken {
@@ -261,11 +263,14 @@ pub fn compile(src: &str) {
         had_error: false,
         scanner: Box::new(scanner),
         chunk: Box::new(Chunk::new()),
-        scope: Scope::init(),
+        scope: Box::new(Scope::init(NewToken {
+            ttype: TokenType::Identifier,
+            line: 0,
+            start: 0,
+            length: 0,
+        })),
     };
-    if !parser.parse() {
-        parser.run();
-    }
+    parser.parse()
 }
 
 struct Parser {
@@ -274,7 +279,7 @@ struct Parser {
     had_error: bool,
     scanner: Box<Scanner>,
     chunk: Box<Chunk>,
-    scope: Scope,
+    scope: Box<Scope>,
 }
 
 impl Parser {
@@ -295,12 +300,12 @@ impl Parser {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OP_RETURN);
+        self.emit_bytes(OP_NIL, OP_RETURN);
     }
 
     fn number(&mut self) -> Result<(), ParseError> {
         let value = self.get_string(&self.previous).parse::<f64>().unwrap();
-        self.emit_constant(BasicType::Number(value))
+        self.emit_constant(LoxType::Number(value))
     }
 
     fn emit_constant(&mut self, val: Value) -> Result<(), ParseError> {
@@ -323,11 +328,60 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<(), ParseError> {
+        if self.match_advance(TokenType::Fun) {
+            return self.fun_declaration();
+        }
         if self.match_advance(TokenType::Var) {
             self.var_declaration()
         } else {
             self.statement()
         }
+    }
+
+    fn fun_declaration(&mut self) -> Result<(), ParseError> {
+        let global = self.parse_variable()?;
+        self.make_initialized();
+        self.function()?;
+        self.define_variable(global)
+    }
+
+    fn function(&mut self) -> Result<(), ParseError> {
+        // store old values
+        let mut old_chunk = Box::new(Chunk::new());
+        let mut old_scope = Box::new(Scope::init(self.previous));
+        std::mem::swap(&mut old_chunk, &mut self.chunk);
+        std::mem::swap(&mut old_scope, &mut self.scope);
+
+        let name = self.get_string(&self.previous);
+        self.begin_scope();
+        let mut arity: u8 = 0;
+        self.expect(TokenType::LeftParen)?;
+        if !self.is_match(TokenType::RightParen) {
+            loop {
+                arity += 1;
+                let constant = self.parse_variable()?;
+                self.define_variable(constant)?;
+                if !self.match_advance(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenType::RightParen)?;
+        self.expect(TokenType::LeftBrace)?;
+        self.block()?;
+        self.emit_return();
+        let func: Rc<Function> = Rc::new(Function {
+            arity,
+            chunk: self.chunk.clone(), // Hopefully, remove clone in the future.
+            name,
+        });
+
+        // Restore old chunk and scope
+        std::mem::swap(&mut old_chunk, &mut self.chunk);
+        std::mem::swap(&mut old_scope, &mut self.scope);
+        let pos = self.make_constant(LoxType::Function(func.clone()))?;
+        self.emit_bytes(OP_CONSTANT, pos);
+        Ok(())
     }
 
     fn var_declaration(&mut self) -> Result<(), ParseError> {
@@ -386,7 +440,7 @@ impl Parser {
     }
 
     fn identifier_constant(&mut self) -> Result<u8, ParseError> {
-        self.make_constant(BasicType::String(self.get_string(&self.previous)))
+        self.make_constant(LoxType::String(self.get_string(&self.previous)))
     }
 
     fn define_variable(&mut self, id: u8) -> Result<(), ParseError> {
@@ -399,6 +453,9 @@ impl Parser {
     }
 
     fn make_initialized(&mut self) {
+        if self.scope.depth == 0 {
+            return;
+        }
         let len = self.scope.locals.len();
         self.scope.locals[len - 1].depth = self.scope.depth;
     }
@@ -425,6 +482,8 @@ impl Parser {
             self.print_statement()
         } else if self.match_advance(TokenType::If) {
             self.if_statement()
+        } else if self.match_advance(TokenType::Return) {
+            self.return_statement()
         } else if self.match_advance(TokenType::While) {
             self.while_statement()
         } else if self.match_advance(TokenType::LeftBrace) {
@@ -434,6 +493,18 @@ impl Parser {
             Ok(())
         } else {
             self.expression_statement()
+        }
+    }
+
+    fn return_statement(&mut self) -> Result<(), ParseError> {
+        if self.match_advance(TokenType::Semicolon) {
+            self.emit_return();
+            Ok(())
+        } else {
+            self.expression()?;
+            self.expect(TokenType::Semicolon)?;
+            self.emit_byte(OP_RETURN);
+            Ok(())
         }
     }
 
@@ -595,7 +666,7 @@ impl Parser {
 
     fn string(&mut self) -> Result<(), ParseError> {
         let string = self.get_string(&self.previous);
-        self.emit_constant(BasicType::String(string[1..string.len() - 1].to_string()))
+        self.emit_constant(LoxType::String(string[1..string.len() - 1].to_string()))
     }
 
     fn variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
@@ -678,6 +749,7 @@ impl Parser {
                 | TokenType::LessEqual => self.binary(),
                 TokenType::And => self.and(),
                 TokenType::Or => self.or(),
+                TokenType::LeftParen => self.call(),
                 _ => Ok(()),
             }?
         }
@@ -689,6 +761,27 @@ impl Parser {
             });
         }
         Ok(())
+    }
+
+    fn call(&mut self) -> Result<(), ParseError> {
+        let cnt = self.arg_list()?;
+        self.emit_bytes(OP_CALL, cnt);
+        Ok(())
+    }
+
+    fn arg_list(&mut self) -> Result<u8, ParseError> {
+        let mut cnt: u8 = 0;
+        if !self.is_match(TokenType::RightParen) {
+            loop {
+                self.expression()?;
+                cnt += 1;
+                if !self.match_advance(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenType::RightParen)?;
+        Ok(cnt)
     }
 
     fn and(&mut self) -> Result<(), ParseError> {
@@ -771,7 +864,7 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self) -> bool {
+    fn parse(&mut self) -> Option<Rc<Function>> {
         let res = self.advance();
         self.handle_result(res);
         while !self.match_advance(TokenType::Eof) {
@@ -782,12 +875,15 @@ impl Parser {
         if DEBUG && !self.had_error {
             self.disassemble_chunk();
         }
-        self.had_error
-    }
-
-    fn run(&self) {
-        let mut vm = VM::init(&self.chunk);
-        vm.interpret(&self.chunk);
+        if self.had_error {
+            None
+        } else {
+            Some(Rc::new(Function {
+                arity: 0,
+                chunk: self.chunk.clone(), // Hopefully, remove clone in the future.
+                name: "".to_string(),
+            }))
+        }
     }
 }
 
@@ -802,9 +898,12 @@ struct Scope {
 }
 
 impl Scope {
-    fn init() -> Scope {
+    fn init(token: NewToken) -> Scope {
         Scope {
-            locals: Vec::new(),
+            locals: vec![Local {
+                name: token,
+                depth: 0,
+            }],
             depth: 0,
         }
     }
@@ -826,6 +925,7 @@ fn get_precedence(ttype: TokenType) -> Prec {
         TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => {
             Prec::Comparison
         }
+        TokenType::LeftParen => Prec::Call,
         TokenType::And => Prec::And,
         TokenType::Or => Prec::Or,
         _ => Prec::None,
@@ -890,5 +990,10 @@ mod tests {
     #[test]
     fn test_if_statement2() {
         let _ = compile("var x = true;\nvar y = false;\nif (x and y)\n print \"Wrong\";\nelse\nprint \"Correct\";\n");
+    }
+
+    #[test]
+    fn test_fun_statement() {
+        let _ = compile("fun hello(x)\n{\n print x;\n print \"Hello world\";\n}\n hello(1);\n");
     }
 }

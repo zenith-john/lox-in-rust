@@ -1,28 +1,45 @@
 use crate::chunk;
-use crate::chunk::{Chunk, Value};
-use crate::error::RuntimeError;
-use crate::token::BasicType;
-use crate::{DEBUG, USIZE};
+use crate::chunk::Value;
+use crate::object::{Function, LoxType};
+use crate::{BACKTRACE, DEBUG, USIZE};
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-pub struct VM<'a> {
-    vm: &'a Chunk,
-    ip: usize,
+#[derive(Debug)]
+pub struct RuntimeError {
+    pub reason: String,
+    pub line: i32,
+}
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[Line {}] in script, Runtime Error: {}",
+            self.line, self.reason
+        )
+    }
+}
+impl std::error::Error for RuntimeError {}
+
+pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
+    frames: Vec<Rc<RefCell<CallFrame>>>,
 }
 
 macro_rules! binary_op {
-    ($stack:expr, $op:tt) => {{
+    ($stack:expr, $op:tt, $frame: expr) => {{
         if let (Some(a), Some(b)) = ($stack.peek(0).as_number(), $stack.peek(1).as_number()) {
             $stack.pop();
             $stack.pop();
-            $stack.push(BasicType::Number(b $op a));
+            $stack.push(LoxType::Number(b $op a));
         }
         else {
-            return Err(RuntimeError::Reason {
-                line: $stack.vm.read_line($stack.ip - 1)?,
+            return Err(RuntimeError {
+                line: $frame.read_line()?,
                 reason: "Operands must be numbers.".to_string()
             }
             )
@@ -31,15 +48,15 @@ macro_rules! binary_op {
 }
 
 macro_rules! binary_op_bool {
-    ($stack:expr, $op:tt) => {{
+    ($stack:expr, $op:tt, $frame: expr) => {{
         if let (Some(a), Some(b)) = ($stack.peek(0).as_number(), $stack.peek(1).as_number()) {
             $stack.pop();
             $stack.pop();
-            $stack.push(BasicType::Bool(b $op a));
+            $stack.push(LoxType::Bool(b $op a));
         }
         else {
-            return Err(RuntimeError::Reason {
-                line: $stack.vm.read_line($stack.ip - 1)?,
+            return Err(RuntimeError {
+                line: $frame.read_line()?,
                 reason: "Operands must be numbers.".to_string()
             }
             )
@@ -47,18 +64,21 @@ macro_rules! binary_op_bool {
     }};
 }
 
-impl<'a> VM<'a> {
-    pub fn init(chunk: &'a Chunk) -> VM<'a> {
+impl VM {
+    pub fn init() -> VM {
         VM {
-            vm: chunk,
-            ip: 0,
             stack: Vec::new(),
             globals: HashMap::new(),
+            frames: Vec::new(),
         }
     }
 
+    fn current(&self) -> Rc<RefCell<CallFrame>> {
+        self.frames.last().expect("Frame is empty").clone()
+    }
+
     pub fn reset_stack(&mut self) {
-        self.stack = Vec::new();
+        self.stack.clear();
     }
 
     pub fn push(&mut self, val: Value) {
@@ -69,240 +89,297 @@ impl<'a> VM<'a> {
         self.stack.pop().expect("Pop from empty stack")
     }
 
-    pub fn peek(&mut self, distance: usize) -> Value {
-        self.stack[self.stack.len() - 1 - distance].clone()
+    pub fn peek(&self, distance: usize) -> &Value {
+        &self.stack[self.stack.len() - 1 - distance]
         // Hopefully remove clone in the future
     }
 
-    pub fn interpret(&mut self, chunk: &'a Chunk) {
-        self.vm = chunk;
-        self.ip = 0;
-        self.reset_stack();
+    pub fn interpret(&mut self, func: Rc<Function>) {
+        self.push(LoxType::Function(func.clone()));
+        let _ = self.call(func, 0);
         if let Err(e) = self.run() {
-            eprintln!("{:?}", e);
+            if BACKTRACE {
+                eprintln!("Backtrace:");
+                for frame in self.frames.iter().rev() {
+                    let f = frame.borrow();
+                    let line = f.read_line().unwrap();
+                    eprintln!(
+                        "[Line {}] in {}",
+                        line,
+                        if f.function.name.is_empty() {
+                            "Script"
+                        } else {
+                            &f.function.name
+                        }
+                    );
+                    eprintln!();
+                }
+            }
             self.reset_stack();
+            eprintln!("{}", e);
         }
     }
 
     pub fn run(&mut self) -> Result<(), RuntimeError> {
-        while self.ip < self.vm.len() {
-            if DEBUG {
-                self.vm.disassemble_instruction(self.ip);
-                println!();
-                for val in &self.stack {
-                    print!("[ {} ]", val);
-                }
-                println!();
-            }
-            let op = self.read_chunk()?;
-            match op {
-                chunk::OP_RETURN => {
-                    // println!("{}", self.pop());
-                    return Ok(());
-                }
-                chunk::OP_CONSTANT => {
-                    let offset = self.read_chunk()?;
-                    let constant = self.vm.read_constant(offset as usize)?;
-                    self.push(constant);
-                }
-                chunk::OP_NEGATE => {
-                    if let Some(x) = self.peek(0).as_number() {
-                        self.pop();
-                        let val = BasicType::Number(-x);
-                        self.push(val);
-                    } else {
-                        return Err(RuntimeError::Reason {
-                            line: self.vm.read_line(self.ip - 1)?,
-                            reason: "Operand must be a number".to_string(),
-                        });
+        while !self.frames.is_empty() {
+            let binding = self.current();
+            let mut current = binding.borrow_mut();
+            while current.ip < current.function.chunk.len() {
+                if DEBUG {
+                    eprintln!();
+                    for val in &self.stack {
+                        eprint!("[ {} ]", val);
                     }
+                    eprintln!();
+                    current.function.chunk.disassemble_instruction(current.ip);
                 }
-                chunk::OP_ADD => {
-                    if let (Some(a), Some(b)) = (self.peek(0).as_number(), self.peek(1).as_number())
-                    {
-                        self.pop();
-                        self.pop();
-                        self.push(BasicType::Number(b + a));
-                    } else if let (Some(a), Some(b)) =
-                        (self.peek(0).as_string(), self.peek(1).as_string())
-                    {
-                        self.pop();
-                        self.pop();
-                        self.push(BasicType::String(b + &a))
-                    } else {
-                        return Err(RuntimeError::Reason {
-                            line: self.vm.read_line(self.ip - 1)?,
-                            reason: "Operands must be numbers.".to_string(),
-                        });
+                let op = current.read_chunk()?;
+                match op {
+                    chunk::OP_RETURN => {
+                        let ret = self.pop();
+                        self.frames.pop();
+                        if self.frames.is_empty() {
+                            self.pop();
+                            return Ok(());
+                        }
+                        let slot = current.slot;
+                        self.stack.truncate(slot);
+                        self.push(ret);
+                        break;
                     }
-                }
-                chunk::OP_SUBTRACT => {
-                    binary_op!(self, -);
-                }
-                chunk::OP_MULTIPLY => {
-                    binary_op!(self, *);
-                }
-                chunk::OP_DIVIDE => {
-                    binary_op!(self, /);
-                }
-                chunk::OP_NIL => {
-                    self.push(BasicType::None);
-                }
-                chunk::OP_TRUE => {
-                    self.push(BasicType::Bool(true));
-                }
-                chunk::OP_FALSE => {
-                    self.push(BasicType::Bool(false));
-                }
-                chunk::OP_NOT => {
-                    let logic = match self.pop() {
-                        BasicType::None => true,
-                        BasicType::Bool(x) => !x,
-                        _ => false,
-                    };
-                    // permissive NOT
-                    self.push(BasicType::Bool(logic))
-                }
-                chunk::OP_EQUAL => {
-                    let left = self.pop();
-                    let right = self.pop();
-                    self.push(BasicType::Bool(left == right))
-                }
-                chunk::OP_GREATER => {
-                    binary_op_bool!(self, >)
-                }
-                chunk::OP_LESS => {
-                    binary_op_bool!(self, <)
-                }
-                chunk::OP_PRINT => {
-                    println!("{}", self.pop());
-                }
-                chunk::OP_POP => {
-                    self.pop();
-                }
-                chunk::OP_DEFINE_GLOBAL => {
-                    let offset = self.read_chunk()?;
-                    let constant = self.vm.read_constant(offset as usize)?;
-                    if let Some(name) = constant.as_string() {
-                        let val = self.peek(0);
-                        self.globals.insert(name, val);
-                        self.pop();
-                    } else {
-                        return Err(RuntimeError::Reason {
-                            reason: format!("{} is not a variable name.", constant),
-                            line: self.vm.read_line(self.ip - 1)?,
-                        });
+                    chunk::OP_CONSTANT => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        self.push(constant);
                     }
-                }
-                chunk::OP_GET_GLOBAL => {
-                    let offset = self.read_chunk()?;
-                    let constant = self.vm.read_constant(offset as usize)?;
-                    if let Some(name) = constant.as_string() {
-                        if let Some(val) = self.globals.get(&name) {
-                            self.push(val.clone());
+                    chunk::OP_NEGATE => {
+                        if let Some(x) = self.peek(0).as_number() {
+                            self.pop();
+                            let val = LoxType::Number(-x);
+                            self.push(val);
                         } else {
-                            return Err(RuntimeError::Reason {
-                                reason: format!("Variable {} is not defined.", constant),
-                                line: self.vm.read_line(self.ip - 1)?,
+                            return Err(RuntimeError {
+                                line: current.read_line()?,
+                                reason: "Operand must be a number".to_string(),
                             });
                         }
-                    } else {
-                        return Err(RuntimeError::Reason {
-                            reason: format!("{} is not a variable name.", constant),
-                            line: self.vm.read_line(self.ip - 1)?,
-                        });
                     }
-                }
-                chunk::OP_SET_GLOBAL => {
-                    let offset = self.read_chunk()?;
-                    let constant = self.vm.read_constant(offset as usize)?;
-                    if let Some(name) = constant.as_string() {
-                        let val = self.peek(0);
-                        if self.globals.insert(name.clone(), val).is_none() {
-                            self.globals.remove(&name);
-                            return Err(RuntimeError::Reason {
-                                reason: format!("{} is not defined before assignment.", constant),
-                                line: self.vm.read_line(self.ip - 1)?,
+                    chunk::OP_ADD => {
+                        if let (Some(a), Some(b)) =
+                            (self.peek(0).as_number(), self.peek(1).as_number())
+                        {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxType::Number(b + a));
+                        } else if let (Some(a), Some(b)) =
+                            (self.peek(0).as_string(), self.peek(1).as_string())
+                        {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxType::String(b + &a))
+                        } else {
+                            return Err(RuntimeError {
+                                line: current.read_line()?,
+                                reason: "Operands must be numbers.".to_string(),
                             });
                         }
-                    } else {
-                        return Err(RuntimeError::Reason {
-                            reason: format!("{} is not a variable name.", constant),
-                            line: self.vm.read_line(self.ip - 1)?,
-                        });
                     }
-                }
-                chunk::OP_GET_LOCAL => {
-                    let offset = self.read_chunk()?;
-                    self.push(self.stack[offset as usize].clone());
-                }
-                chunk::OP_SET_LOCAL => {
-                    let offset = self.read_chunk()?;
-                    self.stack[offset as usize] = self.peek(0);
-                }
-                chunk::OP_JUMP_IF_FALSE => {
-                    let offset = self.read_jump()?;
-                    let is_false = match self.peek(0) {
-                        BasicType::None => true,
-                        BasicType::Bool(x) => !x,
-                        _ => false,
-                    };
-                    if is_false {
-                        self.ip += offset;
+                    chunk::OP_SUBTRACT => {
+                        binary_op!(self, -, current);
                     }
-                }
-                chunk::OP_JUMP => {
-                    let offset = self.read_jump()?;
-                    self.ip += offset;
-                }
-                chunk::OP_LOOP => {
-                    let offset = self.read_jump()?;
-                    self.ip -= offset;
-                }
-                _ => {
-                    return Err(RuntimeError::Reason {
-                        reason: "Unknown command.".to_string(),
-                        line: self.vm.read_line(self.ip - 1)?,
-                    })
+                    chunk::OP_MULTIPLY => {
+                        binary_op!(self, *, current);
+                    }
+                    chunk::OP_DIVIDE => {
+                        binary_op!(self, /, current);
+                    }
+                    chunk::OP_NIL => {
+                        self.push(LoxType::None);
+                    }
+                    chunk::OP_TRUE => {
+                        self.push(LoxType::Bool(true));
+                    }
+                    chunk::OP_FALSE => {
+                        self.push(LoxType::Bool(false));
+                    }
+                    chunk::OP_NOT => {
+                        let logic = match self.pop() {
+                            LoxType::None => true,
+                            LoxType::Bool(x) => !x,
+                            _ => false,
+                        };
+                        // permissive NOT
+                        self.push(LoxType::Bool(logic))
+                    }
+                    chunk::OP_EQUAL => {
+                        let left = self.pop();
+                        let right = self.pop();
+                        self.push(LoxType::Bool(left == right))
+                    }
+                    chunk::OP_GREATER => {
+                        binary_op_bool!(self, >, current)
+                    }
+                    chunk::OP_LESS => {
+                        binary_op_bool!(self, <, current)
+                    }
+                    chunk::OP_PRINT => {
+                        println!("{}", self.pop());
+                    }
+                    chunk::OP_POP => {
+                        self.pop();
+                    }
+                    chunk::OP_DEFINE_GLOBAL => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        if let Some(name) = constant.as_string() {
+                            let val = self.peek(0);
+                            self.globals.insert(name, val.clone());
+                            self.pop();
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("{} is not a variable name.", constant),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_GET_GLOBAL => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        if let Some(name) = constant.as_string() {
+                            if let Some(val) = self.globals.get(&name) {
+                                self.push(val.clone());
+                            } else {
+                                return Err(RuntimeError {
+                                    reason: format!("Variable {} is not defined.", constant),
+                                    line: current.read_line()?,
+                                });
+                            }
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("{} is not a variable name.", constant),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_SET_GLOBAL => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        if let Some(name) = constant.as_string() {
+                            let val = self.peek(0);
+                            if self.globals.insert(name.clone(), val.clone()).is_none() {
+                                self.globals.remove(&name);
+                                return Err(RuntimeError {
+                                    reason: format!(
+                                        "{} is not defined before assignment.",
+                                        constant
+                                    ),
+                                    line: current.read_line()?,
+                                });
+                            }
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("{} is not a variable name.", constant),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_GET_LOCAL => {
+                        let offset = current.slot + current.read_chunk()? as usize;
+                        self.push(self.stack[offset].clone());
+                    }
+                    chunk::OP_SET_LOCAL => {
+                        let offset = current.slot + current.read_chunk()? as usize;
+                        self.stack[offset] = self.peek(0).clone();
+                    }
+                    chunk::OP_JUMP_IF_FALSE => {
+                        let offset = current.read_jump()?;
+                        let is_false = match self.peek(0) {
+                            LoxType::None => true,
+                            LoxType::Bool(x) => !x,
+                            _ => false,
+                        };
+                        if is_false {
+                            current.ip += offset;
+                        }
+                    }
+                    chunk::OP_JUMP => {
+                        let offset = current.read_jump()?;
+                        current.ip += offset;
+                    }
+                    chunk::OP_LOOP => {
+                        let offset = current.read_jump()?;
+                        current.ip -= offset;
+                    }
+                    chunk::OP_CALL => {
+                        let cnt = current.read_chunk()?;
+                        let func = self.peek(cnt as usize).clone(); // Hopefully, remove this clone in the future.
+                        if let Err(mut e) = self.call_value(&func, cnt) {
+                            e.line = current.read_line()?;
+                            return Err(e);
+                        };
+                        break;
+                    }
+                    _ => {
+                        return Err(RuntimeError {
+                            reason: "Unknown command.".to_string(),
+                            line: current.read_line()?,
+                        })
+                    }
                 }
             }
         }
-        Err(RuntimeError::Reason {
-            reason: "Don't find return command.".to_string(),
-            line: -1,
-        })
+        Ok(())
     }
 
-    fn read_jump(&mut self) -> Result<usize, RuntimeError> {
-        let ret = self.vm.read_jump(self.ip)?;
+    fn call_value(&mut self, fun: &Value, arg_cnt: u8) -> Result<(), RuntimeError> {
+        match fun {
+            LoxType::Function(func) => self.call(func.clone(), arg_cnt),
+            _ => Err(RuntimeError {
+                reason: "Variable is not callable.".to_string(),
+                line: -1,
+            }),
+        }
+    }
+
+    fn call(&mut self, fun: Rc<Function>, arg_cnt: u8) -> Result<(), RuntimeError> {
+        if arg_cnt != fun.arity {
+            return Err(RuntimeError {
+                reason: format!("Expect {} arguments but got {}.", fun.arity, arg_cnt),
+                line: -1,
+            });
+        }
+        self.frames.push(Rc::new(RefCell::new(CallFrame {
+            function: fun,
+            ip: 0,
+            slot: self.stack.len() - arg_cnt as usize - 1,
+        })));
+        Ok(())
+    }
+}
+
+struct CallFrame {
+    function: Rc<Function>,
+    ip: usize,
+    slot: usize,
+}
+
+impl CallFrame {
+    pub fn read_jump(&mut self) -> Result<usize, RuntimeError> {
+        let ret = self.function.chunk.read_jump(self.ip)?;
         self.ip += USIZE;
         Ok(ret)
     }
 
-    fn read_chunk(&mut self) -> Result<u8, RuntimeError> {
+    pub fn read_chunk(&mut self) -> Result<u8, RuntimeError> {
         self.ip += 1;
-        self.vm.read_chunk(self.ip - 1)
+        self.function.chunk.read_chunk(self.ip - 1)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub fn read_constant(&mut self, pos: usize) -> Result<Value, RuntimeError> {
+        self.function.chunk.read_constant(pos)
+    }
 
-    #[test]
-    fn test_op_negate() {
-        let mut chunk = Chunk::new();
-        chunk.add_constant(BasicType::Number(1.0));
-        chunk.add_constant(BasicType::Number(3.0));
-        chunk.write_chunk(1, 0);
-        chunk.write_chunk(0, 0);
-        chunk.write_chunk(1, 0);
-        chunk.write_chunk(1, 0);
-        chunk.write_chunk(2, 0);
-        chunk.write_chunk(3, 0);
-        chunk.write_chunk(0, 0);
-        let mut vm = VM::init(&chunk);
-        let _ = vm.interpret(&chunk);
-        // should output -1
+    pub fn read_line(&self) -> Result<i32, RuntimeError> {
+        self.function.chunk.read_line(self.ip - 1)
     }
 }

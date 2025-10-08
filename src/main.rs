@@ -2,6 +2,7 @@ extern crate lazy_static;
 use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::env;
+use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::{BufRead, BufReader, Error};
@@ -14,6 +15,7 @@ mod compile;
 mod error;
 mod expr;
 mod interpreter;
+mod object;
 mod parser;
 mod resolver;
 mod scanner;
@@ -28,26 +30,53 @@ use crate::resolver::resolve;
 use crate::scanner::scan_tokens;
 use crate::stmt::Environment;
 use crate::token::Token;
+use crate::vm::VM;
 
 const USIZE: usize = std::mem::size_of::<usize>();
-const DEBUG: bool = true;
+const BACKTRACE: bool = true;
+const DEBUG: bool = false;
+const NEW: bool = true;
 
 fn main() {
-    if DEBUG {
-        compile("var x = 1;\nvar y = 2;\nprint x + y;\n");
-    }
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         println!("Usage: lox [script]");
         process::exit(0x0040);
     } else if args.len() == 2 {
-        let _ = run_file(&args[1]);
-    } else {
+        if NEW {
+            let _ = run_file(&args[1]);
+        } else {
+            let _ = run_file_old(&args[1]);
+        }
+    } else if NEW {
         let _ = run_prompt();
+    } else {
+        let _ = run_prompt_old();
     }
 }
 
 fn run_file(path: &String) -> Result<(), Error> {
+    let content = fs::read_to_string(path)?;
+    let mut vm = VM::init();
+    if let Some(function) = compile(&content) {
+        vm.interpret(function);
+    }
+    Ok(())
+}
+
+fn run_prompt() -> Result<(), Error> {
+    let mut vm = VM::init();
+    let lines = io::stdin().lines();
+    for line in lines {
+        let s = line?;
+        if let Some(function) = compile(&s) {
+            vm.interpret(function);
+        }
+    }
+    Ok(())
+}
+
+fn run_file_old(path: &String) -> Result<(), Error> {
     let input = File::open(path)?;
     let buffered = BufReader::new(input);
     let mut l: i32 = 1;
@@ -93,7 +122,7 @@ fn run_file(path: &String) -> Result<(), Error> {
     }
 }
 
-fn run_prompt() -> Result<(), Error> {
+fn run_prompt_old() -> Result<(), Error> {
     let lines = io::stdin().lines();
     let mut l: i32 = 1;
     let env: Rc<RefCell<Environment>> = Rc::new(RefCell::new(Environment::new()));
