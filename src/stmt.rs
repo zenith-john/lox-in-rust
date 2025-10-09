@@ -31,7 +31,6 @@ pub enum Stmt {
         expression: Box<Expr>,
     },
     Return {
-        keyword: Token,
         value: Option<Box<Expr>>,
     },
     Var {

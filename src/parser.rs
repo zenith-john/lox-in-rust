@@ -279,7 +279,7 @@ fn if_statement(tokens: &mut LinkedList<Token>) -> Result<Box<Stmt>, ParseError>
 }
 
 fn return_statement(tokens: &mut LinkedList<Token>) -> Result<Box<Stmt>, ParseError> {
-    let token = tokens.pop_front().expect("Must be keyword return.");
+    tokens.pop_front().expect("Must be keyword return.");
     let mut value: Option<Box<Expr>> = None;
     if !match_head(tokens, &[TokenType::Semicolon]) {
         value = Some(expression(tokens)?);
@@ -291,10 +291,7 @@ fn return_statement(tokens: &mut LinkedList<Token>) -> Result<Box<Stmt>, ParseEr
         ));
     }
     tokens.pop_front();
-    Ok(Box::new(Stmt::Return {
-        keyword: token,
-        value,
-    }))
+    Ok(Box::new(Stmt::Return { value }))
 }
 
 fn while_statement(tokens: &mut LinkedList<Token>) -> Result<Box<Stmt>, ParseError> {

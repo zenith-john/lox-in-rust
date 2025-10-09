@@ -88,7 +88,7 @@ fn resolve_stmt(
         Stmt::Print { expression } => {
             resolve_expr(expression, scopes, table);
         }
-        Stmt::Return { keyword: _, value } => {
+        Stmt::Return { value } => {
             if let Some(expr) = value {
                 resolve_expr(expr, scopes, table);
             }
