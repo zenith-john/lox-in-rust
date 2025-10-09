@@ -35,6 +35,8 @@ pub const OP_GET_UPVALUE: u8 = 29;
 pub const OP_SET_UPVALUE: u8 = 30;
 pub const OP_CLOSE_UPVALUE: u8 = 31;
 pub const OP_METHOD: u8 = 32;
+pub const OP_INHERIT: u8 = 33;
+pub const OP_GET_SUPER: u8 = 34;
 
 pub type Value = LoxType;
 
@@ -166,7 +168,7 @@ impl Chunk {
                 for i in 0..upvalue {
                     let is_local = self.code[offset + 2 + 2 * i];
                     let index = self.code[offset + 2 + 2 * i];
-                    println!(
+                    eprintln!(
                         "[{}] {}: {}",
                         offset + 2 + 2 * i,
                         if is_local == 1 { "Local" } else { "Upvalue" },
@@ -179,6 +181,8 @@ impl Chunk {
             OP_SET_UPVALUE => self.byte_instruction("OP_SET_UPVALUE".to_string(), offset),
             OP_CLOSE_UPVALUE => self.simple_instruction("OP_CLOSE_UPVALUE".to_string(), offset),
             OP_METHOD => self.constant_instruction("OP_SET_GLOBAL".to_string(), offset),
+            OP_INHERIT => self.simple_instruction("OP_INHERIT".to_string(), offset),
+            OP_GET_SUPER => self.constant_instruction("GET_SUPER".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }

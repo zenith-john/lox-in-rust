@@ -1,5 +1,5 @@
 use crate::chunk::*;
-use crate::object::{Function, LoxType};
+use crate::object::Function;
 use crate::scanner::keywords;
 use crate::token::TokenType;
 use crate::{DEBUG, USIZE};
@@ -330,7 +330,7 @@ impl Parser {
 
     fn number(&mut self) -> Result<(), ParseError> {
         let value = self.get_string(&self.previous).parse::<f64>().unwrap();
-        self.emit_constant(LoxType::Number(value))
+        self.emit_constant(Value::Number(value))
     }
 
     fn emit_constant(&mut self, val: Value) -> Result<(), ParseError> {
@@ -366,7 +366,8 @@ impl Parser {
 
     fn class_declaration(&mut self) -> Result<(), ParseError> {
         self.expect(TokenType::Identifier)?;
-        let class_name = self.previous;
+        let class = self.previous;
+        let class_name = self.get_string(&class);
 
         self.class_level += 1;
         let constant = self.identifier_constant()?;
@@ -374,11 +375,27 @@ impl Parser {
         self.emit_bytes(OP_CLASS, constant);
         self.define_variable(constant)?;
 
-        // Ugly code, because I don't give named variable another parameter.
-        let previous_old = self.previous;
-        self.previous = class_name;
-        self.named_variable(false)?;
-        self.previous = previous_old;
+        let has_super = self.match_advance(TokenType::Less);
+        if has_super {
+            self.expect(TokenType::Identifier)?;
+            self.variable(false)?;
+            let prev_name = self.get_string(&self.previous);
+            if self.identifier_equal(&class_name, &prev_name) {
+                return Err(ParseError {
+                    line: self.previous.line,
+                    token: self.get_string(&self.previous),
+                    reason: "Class can't inherit itself".to_string(),
+                });
+            }
+
+            self.begin_scope();
+            self.add_local("super".to_string())?;
+            self.define_variable(0)?;
+            self.named_variable(&class_name, false)?;
+            self.emit_byte(OP_INHERIT);
+        }
+
+        self.named_variable(&class_name, false)?;
 
         self.expect(TokenType::LeftBrace)?;
         while !self.is_match(TokenType::RightBrace) && !self.is_match(TokenType::Eof) {
@@ -386,6 +403,10 @@ impl Parser {
         }
         self.expect(TokenType::RightBrace)?;
         self.emit_byte(OP_POP);
+
+        if has_super {
+            self.end_scope();
+        }
         self.class_level -= 1;
         Ok(())
     }
@@ -449,7 +470,7 @@ impl Parser {
         let current = std::mem::replace(&mut self.scope, Box::new(Scope::init("".to_string())));
         *self.chunk = self.chunk_history.pop().expect("Chunk history is empty");
         *self.scope = self.scope_history.pop().expect("Scope history is empty");
-        let pos = self.make_constant(LoxType::Function(func.clone()))?;
+        let pos = self.make_constant(Value::Function(func.clone()))?;
         self.emit_bytes(OP_CLOSURE, pos);
         for value in current.upvalues {
             self.emit_byte(if value.is_local { 1 } else { 0 });
@@ -515,7 +536,12 @@ impl Parser {
     }
 
     fn identifier_constant(&mut self) -> Result<u8, ParseError> {
-        self.make_constant(LoxType::String(self.get_string(&self.previous)))
+        let name = self.get_string(&self.previous);
+        self.identifier_constant_helper(&name)
+    }
+
+    fn identifier_constant_helper(&mut self, name: &str) -> Result<u8, ParseError> {
+        self.make_constant(Value::String(name.to_owned()))
     }
 
     fn define_variable(&mut self, id: u8) -> Result<(), ParseError> {
@@ -745,21 +771,21 @@ impl Parser {
 
     fn string(&mut self) -> Result<(), ParseError> {
         let string = self.get_string(&self.previous);
-        self.emit_constant(LoxType::String(string[1..string.len() - 1].to_string()))
+        self.emit_constant(Value::String(string[1..string.len() - 1].to_string()))
     }
 
     fn variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
-        self.named_variable(can_assign)
+        let prev_name = self.get_string(&self.previous);
+        self.named_variable(&prev_name, can_assign)
     }
 
-    fn resolve_upvalue(&mut self) -> Result<Option<u8>, ParseError> {
+    fn resolve_upvalue(&mut self, name: &String) -> Result<Option<u8>, ParseError> {
         if self.scope_history.is_empty() {
             return Ok(None);
         }
-        let prev_name = self.get_string(&self.previous);
         for (depth, scope) in self.scope_history.iter().enumerate().rev() {
             for i in (0..scope.locals.len()).rev() {
-                if self.identifier_equal(&prev_name, &scope.locals[i].name) {
+                if self.identifier_equal(name, &scope.locals[i].name) {
                     return self.add_upvalues(i, depth);
                 }
             }
@@ -781,10 +807,9 @@ impl Parser {
         }
     }
 
-    fn resolve_local(&mut self) -> Result<Option<u8>, ParseError> {
-        let prev_name = self.get_string(&self.previous);
+    fn resolve_local(&mut self, name: &String) -> Result<Option<u8>, ParseError> {
         for i in (0..self.scope.locals.len()).rev() {
-            if self.identifier_equal(&prev_name, &self.scope.locals[i].name) {
+            if self.identifier_equal(name, &self.scope.locals[i].name) {
                 if self.scope.locals[i].depth == -1 {
                     return Err(ParseError {
                         line: self.previous.line,
@@ -798,12 +823,12 @@ impl Parser {
         Ok(None)
     }
 
-    fn named_variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
-        let mut arg = self.resolve_local()?;
+    fn named_variable(&mut self, name: &String, can_assign: bool) -> Result<(), ParseError> {
+        let mut arg = self.resolve_local(name)?;
         let (get_op, set_op) = if arg.is_some() {
             (OP_GET_LOCAL, OP_SET_LOCAL)
         } else {
-            arg = self.resolve_upvalue()?;
+            arg = self.resolve_upvalue(name)?;
             if arg.is_some() {
                 (OP_GET_UPVALUE, OP_SET_UPVALUE)
             } else {
@@ -814,7 +839,7 @@ impl Parser {
         let pos = if let Some(u) = arg {
             u
         } else {
-            self.identifier_constant()?
+            self.identifier_constant_helper(name)?
         };
 
         if can_assign && self.match_advance(TokenType::Equal) {
@@ -837,6 +862,7 @@ impl Parser {
             TokenType::String => self.string(),
             TokenType::Identifier => self.variable(can_assign),
             TokenType::This => self.this_(),
+            TokenType::Super => self.super_(),
             _ => Err(ParseError {
                 line: self.previous.line,
                 token: self.get_string(&self.previous),
@@ -883,6 +909,28 @@ impl Parser {
             });
         }
         self.variable(false)
+    }
+
+    fn super_(&mut self) -> Result<(), ParseError> {
+        if self.class_level == 0 {
+            return Err(ParseError {
+                line: self.previous.line,
+                token: self.get_string(&self.previous),
+                reason: "Invalid super keyword outside Class definition.".to_string(),
+            });
+        }
+        // Not check whether current class has superclass.
+
+        self.expect(TokenType::Dot)?;
+        self.expect(TokenType::Identifier)?;
+        let name = self.identifier_constant()?;
+
+        let this_str = "this".to_string();
+        let super_str = "super".to_string();
+        self.named_variable(&this_str, false)?;
+        self.named_variable(&super_str, false)?;
+        self.emit_bytes(OP_GET_SUPER, name);
+        Ok(())
     }
 
     fn dot(&mut self, can_assign: bool) -> Result<(), ParseError> {

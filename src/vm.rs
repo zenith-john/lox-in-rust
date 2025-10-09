@@ -1,6 +1,6 @@
 use crate::chunk;
 use crate::chunk::Value;
-use crate::object::{BoundMethod, Class, Closure, Function, Instance, LoxType, Upvalue};
+use crate::object::{BoundMethod, Class, Closure, Function, Instance, Upvalue};
 use crate::{BACKTRACE, DEBUG, USIZE};
 
 use std::cell::RefCell;
@@ -36,7 +36,7 @@ macro_rules! binary_op {
         if let (Some(a), Some(b)) = ($stack.peek(0).as_number(), $stack.peek(1).as_number()) {
             $stack.pop();
             $stack.pop();
-            $stack.push(LoxType::Number(b $op a));
+            $stack.push(Value::Number(b $op a));
         }
         else {
             return Err(RuntimeError {
@@ -53,7 +53,7 @@ macro_rules! binary_op_bool {
         if let (Some(a), Some(b)) = ($stack.peek(0).as_number(), $stack.peek(1).as_number()) {
             $stack.pop();
             $stack.pop();
-            $stack.push(LoxType::Bool(b $op a));
+            $stack.push(Value::Bool(b $op a));
         }
         else {
             return Err(RuntimeError {
@@ -98,7 +98,7 @@ impl VM {
 
     pub fn interpret(&mut self, func: Rc<Function>) {
         let clos = Closure::new(func);
-        self.push(LoxType::Closure(clos.clone()));
+        self.push(Value::Closure(clos.clone()));
         let _ = self.call(clos, 0);
         if let Err(e) = self.run() {
             if BACKTRACE {
@@ -171,7 +171,7 @@ impl VM {
                     chunk::OP_NEGATE => {
                         if let Some(x) = self.peek(0).as_number() {
                             self.pop();
-                            let val = LoxType::Number(-x);
+                            let val = Value::Number(-x);
                             self.push(val);
                         } else {
                             return Err(RuntimeError {
@@ -186,13 +186,13 @@ impl VM {
                         {
                             self.pop();
                             self.pop();
-                            self.push(LoxType::Number(b + a));
+                            self.push(Value::Number(b + a));
                         } else if let (Some(a), Some(b)) =
                             (self.peek(0).as_string(), self.peek(1).as_string())
                         {
                             self.pop();
                             self.pop();
-                            self.push(LoxType::String(b + &a))
+                            self.push(Value::String(b + &a))
                         } else {
                             return Err(RuntimeError {
                                 line: current.read_line()?,
@@ -210,27 +210,27 @@ impl VM {
                         binary_op!(self, /, current);
                     }
                     chunk::OP_NIL => {
-                        self.push(LoxType::None);
+                        self.push(Value::None);
                     }
                     chunk::OP_TRUE => {
-                        self.push(LoxType::Bool(true));
+                        self.push(Value::Bool(true));
                     }
                     chunk::OP_FALSE => {
-                        self.push(LoxType::Bool(false));
+                        self.push(Value::Bool(false));
                     }
                     chunk::OP_NOT => {
                         let logic = match self.pop() {
-                            LoxType::None => true,
-                            LoxType::Bool(x) => !x,
+                            Value::None => true,
+                            Value::Bool(x) => !x,
                             _ => false,
                         };
                         // permissive NOT
-                        self.push(LoxType::Bool(logic))
+                        self.push(Value::Bool(logic))
                     }
                     chunk::OP_EQUAL => {
                         let left = self.pop();
                         let right = self.pop();
-                        self.push(LoxType::Bool(left == right))
+                        self.push(Value::Bool(left == right))
                     }
                     chunk::OP_GREATER => {
                         binary_op_bool!(self, >, current)
@@ -310,8 +310,8 @@ impl VM {
                     chunk::OP_JUMP_IF_FALSE => {
                         let offset = current.read_jump()?;
                         let is_false = match self.peek(0) {
-                            LoxType::None => true,
-                            LoxType::Bool(x) => !x,
+                            Value::None => true,
+                            Value::Bool(x) => !x,
                             _ => false,
                         };
                         if is_false {
@@ -330,22 +330,22 @@ impl VM {
                         let cnt = current.read_chunk()?;
                         let function = self.peek(cnt as usize).clone(); // Hopefully, remove this clone in the future.
                         match function {
-                            LoxType::Closure(cls) => {
+                            Value::Closure(cls) => {
                                 if let Err(mut e) = self.call(cls, cnt) {
                                     e.line = current.read_line()?;
                                     return Err(e);
                                 };
                             }
-                            LoxType::Class(klass) => {
+                            Value::Class(klass) => {
                                 self.pop();
-                                self.stack.push(LoxType::Instance(Rc::new(RefCell::new(
+                                self.stack.push(Value::Instance(Rc::new(RefCell::new(
                                     Instance::new(klass.clone()),
                                 ))));
                             }
-                            LoxType::BoundMethod(bound) => {
+                            Value::BoundMethod(bound) => {
                                 let size = self.stack.len();
                                 self.stack[size - 1 - cnt as usize] =
-                                    LoxType::Instance(bound.receiver.clone());
+                                    Value::Instance(bound.receiver.clone());
                                 self.call(bound.method, cnt)?;
                             }
                             _ => {
@@ -361,7 +361,7 @@ impl VM {
                         let offset = current.read_chunk()?;
                         let constant = current.read_constant(offset as usize)?.as_string();
                         if let Some(name) = constant {
-                            self.push(LoxType::Class(Rc::new(RefCell::new(Class {
+                            self.push(Value::Class(Rc::new(RefCell::new(Class {
                                 name,
                                 methods: HashMap::new(),
                             }))));
@@ -374,7 +374,7 @@ impl VM {
                     }
                     chunk::OP_GET_PROPERTY => {
                         let instance = self.pop();
-                        if let LoxType::Instance(ins) = instance {
+                        if let Value::Instance(ins) = instance {
                             let offset = current.read_chunk()?;
                             let constant = current.read_constant(offset as usize)?;
 
@@ -388,7 +388,7 @@ impl VM {
                                         receiver: ins.clone(),
                                         method: method.clone(),
                                     };
-                                    self.push(LoxType::BoundMethod(Box::new(bound)));
+                                    self.push(Value::BoundMethod(Box::new(bound)));
                                 } else {
                                     return Err(RuntimeError {
                                         reason: format!("Property {} is not defined.", constant),
@@ -410,7 +410,7 @@ impl VM {
                     }
                     chunk::OP_SET_PROPERTY => {
                         let instance = self.peek(1);
-                        if let LoxType::Instance(ins) = instance {
+                        if let Value::Instance(ins) = instance {
                             let offset = current.read_chunk()?;
                             let constant = current.read_constant(offset as usize)?;
                             if let Some(name) = constant.as_string() {
@@ -435,7 +435,7 @@ impl VM {
                     chunk::OP_CLOSURE => {
                         let offset = current.read_chunk()?;
                         let constant = current.read_constant(offset as usize)?;
-                        if let LoxType::Function(func) = constant {
+                        if let Value::Function(func) = constant {
                             let mut clos = Closure::new(func.clone());
                             for _ in 0..clos.function.upvalue {
                                 let is_local = current.read_chunk()? == 1;
@@ -455,7 +455,7 @@ impl VM {
                                         .push(current.closure.upvalues[index as usize].clone());
                                 }
                             }
-                            self.push(LoxType::Closure(clos));
+                            self.push(Value::Closure(clos));
                         } else {
                             return Err(RuntimeError {
                                 reason: format!("Expect a function but get {}", constant),
@@ -492,8 +492,7 @@ impl VM {
                             Some(string) => {
                                 let method = self.peek(0).clone();
                                 let klass = self.peek(1).clone();
-                                if let (LoxType::Class(klas), LoxType::Closure(clos)) =
-                                    (klass, method)
+                                if let (Value::Class(klas), Value::Closure(clos)) = (klass, method)
                                 {
                                     klas.borrow_mut().methods.insert(string, clos.clone());
                                 } else {
@@ -513,6 +512,49 @@ impl VM {
                                     line: current.read_line()?,
                                 })
                             }
+                        }
+                    }
+                    chunk::OP_INHERIT => {
+                        let superclass = self.peek(1).clone();
+                        let subclass = self.peek(0).clone();
+                        if let (Value::Class(supc), Value::Class(subc)) = (superclass, subclass) {
+                            subc.borrow_mut().methods = supc.borrow().methods.clone();
+                            self.pop();
+                        } else {
+                            return Err(RuntimeError {
+                                reason: "Inherit can only happen between classes.".to_string(),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_GET_SUPER => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        let superclass = self.pop();
+                        let receiver = self.pop();
+                        if let (Value::Class(supc), Value::Instance(r), Value::String(name)) =
+                            (superclass, receiver, constant)
+                        {
+                            if let Some(method) = supc.borrow().bind_method(&name) {
+                                let bound = BoundMethod {
+                                    receiver: r.clone(),
+                                    method: method.clone(),
+                                };
+                                self.push(Value::BoundMethod(Box::new(bound)));
+                            } else {
+                                return Err(RuntimeError {
+                                    reason: format!(
+                                        "Method {} is not defined in superclass.",
+                                        name
+                                    ),
+                                    line: current.read_line()?,
+                                });
+                            }
+                        } else {
+                            return Err(RuntimeError {
+                                reason: "Invalid super class call.".to_string(),
+                                line: current.read_line()?,
+                            });
                         }
                     }
                     _ => {
