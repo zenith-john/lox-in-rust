@@ -1,6 +1,6 @@
 use crate::chunk;
 use crate::chunk::Value;
-use crate::object::{Class, Closure, Function, Instance, LoxType, Upvalue};
+use crate::object::{BoundMethod, Class, Closure, Function, Instance, LoxType, Upvalue};
 use crate::{BACKTRACE, DEBUG, USIZE};
 
 use std::cell::RefCell;
@@ -342,6 +342,12 @@ impl VM {
                                     Instance::new(klass.clone()),
                                 ))));
                             }
+                            LoxType::BoundMethod(bound) => {
+                                let size = self.stack.len();
+                                self.stack[size - 1 - cnt as usize] =
+                                    LoxType::Instance(bound.receiver.clone());
+                                self.call(bound.method, cnt)?;
+                            }
                             _ => {
                                 return Err(RuntimeError {
                                     reason: "Variable is not callable.".to_string(),
@@ -355,7 +361,10 @@ impl VM {
                         let offset = current.read_chunk()?;
                         let constant = current.read_constant(offset as usize)?.as_string();
                         if let Some(name) = constant {
-                            self.push(LoxType::Class(Rc::new(Class { name })));
+                            self.push(LoxType::Class(Rc::new(RefCell::new(Class {
+                                name,
+                                methods: HashMap::new(),
+                            }))));
                         } else {
                             return Err(RuntimeError {
                                 reason: "Class name should be a string.".to_string(),
@@ -373,6 +382,13 @@ impl VM {
                                 let inst = ins.borrow();
                                 if let Some(val) = inst.fields.get(&name) {
                                     self.push(val.clone());
+                                } else if let Some(method) = inst.klass.borrow().bind_method(&name)
+                                {
+                                    let bound = BoundMethod {
+                                        receiver: ins.clone(),
+                                        method: method.clone(),
+                                    };
+                                    self.push(LoxType::BoundMethod(Box::new(bound)));
                                 } else {
                                     return Err(RuntimeError {
                                         reason: format!("Property {} is not defined.", constant),
@@ -468,6 +484,36 @@ impl VM {
                     chunk::OP_CLOSE_UPVALUE => {
                         self.close_upvalues(self.stack.len() - 1);
                         self.pop();
+                    }
+                    chunk::OP_METHOD => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        match constant.as_string() {
+                            Some(string) => {
+                                let method = self.peek(0).clone();
+                                let klass = self.peek(1).clone();
+                                if let (LoxType::Class(klas), LoxType::Closure(clos)) =
+                                    (klass, method)
+                                {
+                                    klas.borrow_mut().methods.insert(string, clos.clone());
+                                } else {
+                                    return Err(RuntimeError {
+                                        reason: "Invalid class method definition.".to_string(),
+                                        line: current.read_line()?,
+                                    });
+                                }
+                                self.pop();
+                            }
+                            None => {
+                                return Err(RuntimeError {
+                                    reason: format!(
+                                        "Name of method should be a string but get {}.",
+                                        constant
+                                    ),
+                                    line: current.read_line()?,
+                                })
+                            }
+                        }
                     }
                     _ => {
                         return Err(RuntimeError {

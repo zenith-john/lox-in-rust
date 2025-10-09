@@ -12,8 +12,9 @@ pub enum LoxType {
     Bool(bool),
     Function(Rc<Function>),
     Closure(Closure),
-    Class(Rc<Class>),
+    Class(Rc<RefCell<Class>>),
     Instance(Rc<RefCell<Instance>>),
+    BoundMethod(Box<BoundMethod>),
 }
 
 impl LoxType {
@@ -50,8 +51,9 @@ impl fmt::Display for LoxType {
             LoxType::Bool(b) => write!(f, "{}", b),
             LoxType::Function(fun) => write!(f, "{}", fun.name),
             LoxType::Closure(c) => write!(f, "{}", c.function.name),
-            LoxType::Class(k) => write!(f, "{}", k.name),
-            LoxType::Instance(i) => write!(f, "Instance of {}", i.borrow().klass.name),
+            LoxType::Class(k) => write!(f, "{}", k.borrow().name),
+            LoxType::Instance(i) => write!(f, "Instance of {}", i.borrow().klass.borrow().name),
+            LoxType::BoundMethod(m) => write!(f, "Bound method {}", m.method.function.name),
             LoxType::None => write!(f, "Nil"),
         }
     }
@@ -99,11 +101,18 @@ impl Closure {
 #[derive(Clone)]
 pub struct Class {
     pub name: String,
+    pub methods: HashMap<String, Closure>,
+}
+
+impl Class {
+    pub fn bind_method(&self, name: &String) -> Option<&Closure> {
+        self.methods.get(name)
+    }
 }
 
 #[derive(Clone)]
 pub struct Instance {
-    pub klass: Rc<Class>,
+    pub klass: Rc<RefCell<Class>>,
     pub fields: HashMap<String, LoxType>,
 }
 
@@ -114,10 +123,16 @@ pub enum Upvalue {
 }
 
 impl Instance {
-    pub fn new(klass: Rc<Class>) -> Instance {
+    pub fn new(klass: Rc<RefCell<Class>>) -> Instance {
         Instance {
             klass,
             fields: HashMap::new(),
         }
     }
+}
+
+#[derive(Clone)]
+pub struct BoundMethod {
+    pub receiver: Rc<RefCell<Instance>>,
+    pub method: Closure,
 }

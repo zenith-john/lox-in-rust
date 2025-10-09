@@ -263,14 +263,10 @@ pub fn compile(src: &str) -> Option<Rc<Function>> {
         had_error: false,
         scanner: Box::new(scanner),
         chunk: Box::new(Chunk::new()),
-        scope: Box::new(Scope::init(NewToken {
-            ttype: TokenType::Identifier,
-            line: 0,
-            start: 0,
-            length: 0,
-        })),
+        scope: Box::new(Scope::init("".to_string())),
         chunk_history: Vec::new(),
         scope_history: Vec::new(),
+        class_level: 0,
     };
     parser.parse()
 }
@@ -308,6 +304,7 @@ struct Parser {
     scope: Box<Scope>,
     chunk_history: Vec<Chunk>,
     scope_history: Vec<Scope>,
+    class_level: usize,
 }
 
 impl Parser {
@@ -369,25 +366,57 @@ impl Parser {
 
     fn class_declaration(&mut self) -> Result<(), ParseError> {
         self.expect(TokenType::Identifier)?;
+        let class_name = self.previous;
+
+        self.class_level += 1;
         let constant = self.identifier_constant()?;
         self.declare_variable()?;
         self.emit_bytes(OP_CLASS, constant);
         self.define_variable(constant)?;
+
+        // Ugly code, because I don't give named variable another parameter.
+        let previous_old = self.previous;
+        self.previous = class_name;
+        self.named_variable(false)?;
+        self.previous = previous_old;
+
         self.expect(TokenType::LeftBrace)?;
-        self.expect(TokenType::RightBrace)
+        while !self.is_match(TokenType::RightBrace) && !self.is_match(TokenType::Eof) {
+            self.method()?;
+        }
+        self.expect(TokenType::RightBrace)?;
+        self.emit_byte(OP_POP);
+        self.class_level -= 1;
+        Ok(())
+    }
+
+    fn method(&mut self) -> Result<(), ParseError> {
+        self.expect(TokenType::Identifier)?;
+        let constant = self.identifier_constant()?;
+        self.function(true)?;
+        self.emit_bytes(OP_METHOD, constant);
+        Ok(())
     }
 
     fn fun_declaration(&mut self) -> Result<(), ParseError> {
         let global = self.parse_variable()?;
         self.make_initialized();
-        self.function()?;
+        self.function(false)?;
         self.define_variable(global)
     }
 
-    fn function(&mut self) -> Result<(), ParseError> {
+    fn function(&mut self, is_method: bool) -> Result<(), ParseError> {
         // store old values
+        let name = self.get_string(&self.previous);
         let old_chunk = std::mem::replace(&mut self.chunk, Box::new(Chunk::new()));
-        let old_scope = std::mem::replace(&mut self.scope, Box::new(Scope::init(self.previous)));
+        let old_scope = std::mem::replace(
+            &mut self.scope,
+            Box::new(Scope::init(if is_method {
+                "this".to_string()
+            } else {
+                name
+            })),
+        );
 
         self.chunk_history.push(*old_chunk);
         self.scope_history.push(*old_scope);
@@ -417,7 +446,7 @@ impl Parser {
         });
 
         // Restore old chunk and scope
-        let current = std::mem::replace(&mut self.scope, Box::new(Scope::init(self.previous)));
+        let current = std::mem::replace(&mut self.scope, Box::new(Scope::init("".to_string())));
         *self.chunk = self.chunk_history.pop().expect("Chunk history is empty");
         *self.scope = self.scope_history.pop().expect("Scope history is empty");
         let pos = self.make_constant(LoxType::Function(func.clone()))?;
@@ -456,12 +485,12 @@ impl Parser {
             return Ok(());
         }
 
-        let name = &self.previous;
+        let name = self.get_string(&self.previous);
         for i in (0..self.scope.locals.len()).rev() {
             if self.scope.depth != -1 && self.scope.locals[i].depth < self.scope.depth {
                 break;
             }
-            if self.identifier_equal(name, &self.scope.locals[i].name) {
+            if self.identifier_equal(&name, &self.scope.locals[i].name) {
                 return Err(ParseError {
                     line: self.previous.line,
                     token: self.get_string(&self.previous),
@@ -469,16 +498,16 @@ impl Parser {
                 });
             }
         }
-        self.add_local(*name)
+        self.add_local(name)
     }
 
-    fn identifier_equal(&self, token1: &NewToken, token2: &NewToken) -> bool {
-        self.get_string(token1) == self.get_string(token2)
+    fn identifier_equal(&self, str1: &String, str2: &String) -> bool {
+        str1 == str2
     }
 
-    fn add_local(&mut self, token: NewToken) -> Result<(), ParseError> {
+    fn add_local(&mut self, name: String) -> Result<(), ParseError> {
         self.scope.locals.push(Local {
-            name: token,
+            name,
             depth: -1,
             is_captured: false,
         });
@@ -727,9 +756,10 @@ impl Parser {
         if self.scope_history.is_empty() {
             return Ok(None);
         }
+        let prev_name = self.get_string(&self.previous);
         for (depth, scope) in self.scope_history.iter().enumerate().rev() {
             for i in (0..scope.locals.len()).rev() {
-                if self.identifier_equal(&self.previous, &scope.locals[i].name) {
+                if self.identifier_equal(&prev_name, &scope.locals[i].name) {
                     return self.add_upvalues(i, depth);
                 }
             }
@@ -752,8 +782,9 @@ impl Parser {
     }
 
     fn resolve_local(&mut self) -> Result<Option<u8>, ParseError> {
+        let prev_name = self.get_string(&self.previous);
         for i in (0..self.scope.locals.len()).rev() {
-            if self.identifier_equal(&self.previous, &self.scope.locals[i].name) {
+            if self.identifier_equal(&prev_name, &self.scope.locals[i].name) {
                 if self.scope.locals[i].depth == -1 {
                     return Err(ParseError {
                         line: self.previous.line,
@@ -805,6 +836,7 @@ impl Parser {
             TokenType::False | TokenType::True | TokenType::Nil => self.literal(),
             TokenType::String => self.string(),
             TokenType::Identifier => self.variable(can_assign),
+            TokenType::This => self.this_(),
             _ => Err(ParseError {
                 line: self.previous.line,
                 token: self.get_string(&self.previous),
@@ -834,12 +866,23 @@ impl Parser {
         }
         if can_assign && self.is_match(TokenType::Equal) {
             return Err(ParseError {
-                line: self.previous.line,
+                line: self.current.line,
                 token: self.get_string(&self.current),
                 reason: "Invalid assignment statement.".to_string(),
             });
         }
         Ok(())
+    }
+
+    fn this_(&mut self) -> Result<(), ParseError> {
+        if self.class_level == 0 {
+            return Err(ParseError {
+                line: self.previous.line,
+                token: self.get_string(&self.previous),
+                reason: "Invalid this keyword outside Class definition.".to_string(),
+            });
+        }
+        self.variable(false)
     }
 
     fn dot(&mut self, can_assign: bool) -> Result<(), ParseError> {
@@ -981,7 +1024,7 @@ impl Parser {
 }
 
 struct Local {
-    name: NewToken,
+    name: String,
     depth: i32,
     is_captured: bool,
 }
@@ -999,7 +1042,7 @@ struct Scope {
 }
 
 impl Scope {
-    fn init(token: NewToken) -> Scope {
+    fn init(token: String) -> Scope {
         Scope {
             locals: vec![Local {
                 name: token,
@@ -1159,5 +1202,18 @@ outer();"#);
 
 var closure = outer();
 closure();"#);
+    }
+
+    #[test]
+    fn test_this() {
+        let _ = run(r#"class A {
+ p () {
+print this.t;
+}
+}
+var a = A();
+a.t = 1;
+a.p();
+"#);
     }
 }
