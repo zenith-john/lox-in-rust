@@ -30,6 +30,10 @@ pub const OP_CALL: u8 = 24;
 pub const OP_CLASS: u8 = 25;
 pub const OP_GET_PROPERTY: u8 = 26;
 pub const OP_SET_PROPERTY: u8 = 27;
+pub const OP_CLOSURE: u8 = 28;
+pub const OP_GET_UPVALUE: u8 = 29;
+pub const OP_SET_UPVALUE: u8 = 30;
+pub const OP_CLOSE_UPVALUE: u8 = 31;
 
 pub type Value = LoxType;
 
@@ -152,6 +156,27 @@ impl Chunk {
             OP_CLASS => self.constant_instruction("OP_CLASS".to_string(), offset),
             OP_GET_PROPERTY => self.byte_instruction("OP_GET_PROPERTY".to_string(), offset),
             OP_SET_PROPERTY => self.byte_instruction("OP_SET_PROPERTY".to_string(), offset),
+            OP_CLOSURE => {
+                let pos = self.code[offset + 1];
+                let val = self.constants.get_value(pos as usize);
+                eprintln!("[{}] OP_CLOSURE {}", offset, val);
+                let func = val.as_function().expect("Value is not a function");
+                let upvalue = func.upvalue as usize;
+                for i in 0..upvalue {
+                    let is_local = self.code[offset + 2 + 2 * i];
+                    let index = self.code[offset + 2 + 2 * i];
+                    println!(
+                        "[{}] {}: {}",
+                        offset + 2 + 2 * i,
+                        if is_local == 1 { "Local" } else { "Upvalue" },
+                        index
+                    );
+                }
+                offset + 2 + 2 * upvalue
+            }
+            OP_GET_UPVALUE => self.byte_instruction("OP_GET_UPVALUE".to_string(), offset),
+            OP_SET_UPVALUE => self.byte_instruction("OP_SET_UPVALUE".to_string(), offset),
+            OP_CLOSE_UPVALUE => self.simple_instruction("OP_CLOSE_UPVALUE".to_string(), offset),
             _ => {
                 panic!("Line {}: Unknown code {}", self.lines[offset], instruction);
             }

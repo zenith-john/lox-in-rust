@@ -1,6 +1,6 @@
 use crate::chunk;
 use crate::chunk::Value;
-use crate::object::{Class, Function, Instance, LoxType};
+use crate::object::{Class, Closure, Function, Instance, LoxType, Upvalue};
 use crate::{BACKTRACE, DEBUG, USIZE};
 
 use std::cell::RefCell;
@@ -28,6 +28,7 @@ pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
     frames: Vec<Rc<RefCell<CallFrame>>>,
+    captures: HashMap<usize, Rc<RefCell<Upvalue>>>,
 }
 
 macro_rules! binary_op {
@@ -70,6 +71,7 @@ impl VM {
             stack: Vec::new(),
             globals: HashMap::new(),
             frames: Vec::new(),
+            captures: HashMap::new(),
         }
     }
 
@@ -95,8 +97,9 @@ impl VM {
     }
 
     pub fn interpret(&mut self, func: Rc<Function>) {
-        self.push(LoxType::Function(func.clone()));
-        let _ = self.call(func, 0);
+        let clos = Closure::new(func);
+        self.push(LoxType::Closure(clos.clone()));
+        let _ = self.call(clos, 0);
         if let Err(e) = self.run() {
             if BACKTRACE {
                 eprintln!("Backtrace:");
@@ -106,10 +109,10 @@ impl VM {
                     eprintln!(
                         "[Line {}] in {}",
                         line,
-                        if f.function.name.is_empty() {
+                        if f.closure.function.name.is_empty() {
                             "Script"
                         } else {
-                            &f.function.name
+                            &f.closure.function.name
                         }
                     );
                     eprintln!();
@@ -124,19 +127,32 @@ impl VM {
         while !self.frames.is_empty() {
             let binding = self.current();
             let mut current = binding.borrow_mut();
-            while current.ip < current.function.chunk.len() {
+            while current.ip < current.closure.function.chunk.len() {
                 if DEBUG {
                     eprintln!();
                     for val in &self.stack {
                         eprint!("[ {} ]", val);
                     }
                     eprintln!();
-                    current.function.chunk.disassemble_instruction(current.ip);
+                    current
+                        .closure
+                        .function
+                        .chunk
+                        .disassemble_instruction(current.ip);
+                }
+                if self.stack.len() > 16 * 256 {
+                    return Err(RuntimeError {
+                        reason: "Stack overflow".to_string(),
+                        line: -1,
+                    });
                 }
                 let op = current.read_chunk()?;
                 match op {
                     chunk::OP_RETURN => {
                         let ret = self.pop();
+                        for i in (current.slot..self.stack.len()).rev() {
+                            self.close_upvalues(i); // Expected to optimize in the future
+                        }
                         self.frames.pop();
                         if self.frames.is_empty() {
                             self.pop();
@@ -312,10 +328,10 @@ impl VM {
                     }
                     chunk::OP_CALL => {
                         let cnt = current.read_chunk()?;
-                        let func = self.peek(cnt as usize).clone(); // Hopefully, remove this clone in the future.
-                        match func {
-                            LoxType::Function(func) => {
-                                if let Err(mut e) = self.call(func, cnt) {
+                        let function = self.peek(cnt as usize).clone(); // Hopefully, remove this clone in the future.
+                        match function {
+                            LoxType::Closure(cls) => {
+                                if let Err(mut e) = self.call(cls, cnt) {
                                     e.line = current.read_line()?;
                                     return Err(e);
                                 };
@@ -400,6 +416,59 @@ impl VM {
                             });
                         }
                     }
+                    chunk::OP_CLOSURE => {
+                        let offset = current.read_chunk()?;
+                        let constant = current.read_constant(offset as usize)?;
+                        if let LoxType::Function(func) = constant {
+                            let mut clos = Closure::new(func.clone());
+                            for _ in 0..clos.function.upvalue {
+                                let is_local = current.read_chunk()? == 1;
+                                let index = current.read_chunk()?;
+                                if is_local {
+                                    let address = current.slot + index as usize;
+                                    if let Some(upvalue) = self.captures.get(&address) {
+                                        clos.upvalues.push(upvalue.clone());
+                                    } else {
+                                        let upvalue =
+                                            Rc::new(RefCell::new(Upvalue::Stack(address)));
+                                        self.captures.insert(address, upvalue.clone());
+                                        clos.upvalues.push(upvalue.clone());
+                                    }
+                                } else {
+                                    clos.upvalues
+                                        .push(current.closure.upvalues[index as usize].clone());
+                                }
+                            }
+                            self.push(LoxType::Closure(clos));
+                        } else {
+                            return Err(RuntimeError {
+                                reason: format!("Expect a function but get {}", constant),
+                                line: current.read_line()?,
+                            });
+                        }
+                    }
+                    chunk::OP_GET_UPVALUE => {
+                        let offset = current.read_chunk()?;
+                        let val = match &*current.closure.upvalues[offset as usize].borrow() {
+                            Upvalue::Stack(location) => self.stack[*location].clone(),
+                            Upvalue::Out(rc) => rc.clone(),
+                        };
+                        self.push(val);
+                    }
+                    chunk::OP_SET_UPVALUE => {
+                        let val = self.peek(0).clone();
+                        let offset = current.read_chunk()?;
+                        let mut borrow_mut = current.closure.upvalues[offset as usize].borrow_mut();
+                        let loc = match *borrow_mut {
+                            Upvalue::Stack(location) => &mut self.stack[location],
+                            Upvalue::Out(ref mut rc) => rc,
+                        };
+                        *loc = val.clone();
+                    }
+                    chunk::OP_CLOSE_UPVALUE => {
+                        self.close_upvalues(self.stack.len() - 1);
+                        self.pop();
+                    }
                     _ => {
                         return Err(RuntimeError {
                             reason: "Unknown command.".to_string(),
@@ -412,15 +481,25 @@ impl VM {
         Ok(())
     }
 
-    fn call(&mut self, fun: Rc<Function>, arg_cnt: u8) -> Result<(), RuntimeError> {
-        if arg_cnt != fun.arity {
+    fn close_upvalues(&mut self, slot: usize) {
+        if let Some(val) = self.captures.get(&slot) {
+            *val.borrow_mut() = Upvalue::Out(self.peek(0).clone());
+            self.captures.remove(&slot);
+        }
+    }
+
+    fn call(&mut self, clos: Closure, arg_cnt: u8) -> Result<(), RuntimeError> {
+        if arg_cnt != clos.function.arity {
             return Err(RuntimeError {
-                reason: format!("Expect {} arguments but got {}.", fun.arity, arg_cnt),
+                reason: format!(
+                    "Expect {} arguments but got {}.",
+                    clos.function.arity, arg_cnt
+                ),
                 line: -1,
             });
         }
         self.frames.push(Rc::new(RefCell::new(CallFrame {
-            function: fun,
+            closure: clos,
             ip: 0,
             slot: self.stack.len() - arg_cnt as usize - 1,
         })));
@@ -429,28 +508,28 @@ impl VM {
 }
 
 struct CallFrame {
-    function: Rc<Function>,
+    closure: Closure,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
     pub fn read_jump(&mut self) -> Result<usize, RuntimeError> {
-        let ret = self.function.chunk.read_jump(self.ip)?;
+        let ret = self.closure.function.chunk.read_jump(self.ip)?;
         self.ip += USIZE;
         Ok(ret)
     }
 
     pub fn read_chunk(&mut self) -> Result<u8, RuntimeError> {
         self.ip += 1;
-        self.function.chunk.read_chunk(self.ip - 1)
+        self.closure.function.chunk.read_chunk(self.ip - 1)
     }
 
     pub fn read_constant(&mut self, pos: usize) -> Result<Value, RuntimeError> {
-        self.function.chunk.read_constant(pos)
+        self.closure.function.chunk.read_constant(pos)
     }
 
     pub fn read_line(&self) -> Result<i32, RuntimeError> {
-        self.function.chunk.read_line(self.ip - 1)
+        self.closure.function.chunk.read_line(self.ip - 1)
     }
 }

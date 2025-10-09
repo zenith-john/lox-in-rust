@@ -269,8 +269,34 @@ pub fn compile(src: &str) -> Option<Rc<Function>> {
             start: 0,
             length: 0,
         })),
+        chunk_history: Vec::new(),
+        scope_history: Vec::new(),
     };
     parser.parse()
+}
+
+macro_rules! add_upvalue {
+    ($scope: expr, $pos: expr, $is_local: expr) => {{
+        let current_val = Upvalue {
+            index: $pos as u8,
+            is_local: $is_local,
+        };
+        let mut index = 0;
+        let mut found = false;
+        for i in (0..$scope.upvalues.len()).rev() {
+            if $scope.upvalues[i] == current_val {
+                index = i;
+                found = true;
+                break;
+            }
+        }
+        if found {
+            index as u8
+        } else {
+            $scope.upvalues.push(current_val);
+            $scope.upvalues.len() as u8 - 1
+        }
+    }};
 }
 
 struct Parser {
@@ -280,6 +306,8 @@ struct Parser {
     scanner: Box<Scanner>,
     chunk: Box<Chunk>,
     scope: Box<Scope>,
+    chunk_history: Vec<Chunk>,
+    scope_history: Vec<Scope>,
 }
 
 impl Parser {
@@ -358,11 +386,11 @@ impl Parser {
 
     fn function(&mut self) -> Result<(), ParseError> {
         // store old values
-        let mut old_chunk = Box::new(Chunk::new());
-        let mut old_scope = Box::new(Scope::init(self.previous));
-        std::mem::swap(&mut old_chunk, &mut self.chunk);
-        std::mem::swap(&mut old_scope, &mut self.scope);
+        let old_chunk = std::mem::replace(&mut self.chunk, Box::new(Chunk::new()));
+        let old_scope = std::mem::replace(&mut self.scope, Box::new(Scope::init(self.previous)));
 
+        self.chunk_history.push(*old_chunk);
+        self.scope_history.push(*old_scope);
         let name = self.get_string(&self.previous);
         self.begin_scope();
         let mut arity: u8 = 0;
@@ -382,16 +410,22 @@ impl Parser {
         self.block()?;
         self.emit_return();
         let func: Rc<Function> = Rc::new(Function {
+            upvalue: self.scope.upvalues.len() as u8,
             arity,
             chunk: self.chunk.clone(), // Hopefully, remove clone in the future.
             name,
         });
 
         // Restore old chunk and scope
-        std::mem::swap(&mut old_chunk, &mut self.chunk);
-        std::mem::swap(&mut old_scope, &mut self.scope);
+        let current = std::mem::replace(&mut self.scope, Box::new(Scope::init(self.previous)));
+        *self.chunk = self.chunk_history.pop().expect("Chunk history is empty");
+        *self.scope = self.scope_history.pop().expect("Scope history is empty");
         let pos = self.make_constant(LoxType::Function(func.clone()))?;
-        self.emit_bytes(OP_CONSTANT, pos);
+        self.emit_bytes(OP_CLOSURE, pos);
+        for value in current.upvalues {
+            self.emit_byte(if value.is_local { 1 } else { 0 });
+            self.emit_byte(value.index);
+        }
         Ok(())
     }
 
@@ -446,6 +480,7 @@ impl Parser {
         self.scope.locals.push(Local {
             name: token,
             depth: -1,
+            is_captured: false,
         });
         Ok(())
     }
@@ -480,7 +515,11 @@ impl Parser {
 
         for i in (0..self.scope.locals.len()).rev() {
             if self.scope.locals[i].depth > self.scope.depth {
-                self.emit_byte(OP_POP);
+                if self.scope.locals[i].is_captured {
+                    self.emit_byte(OP_CLOSE_UPVALUE);
+                } else {
+                    self.emit_byte(OP_POP);
+                }
                 self.scope.locals.pop();
             } else {
                 return;
@@ -684,6 +723,34 @@ impl Parser {
         self.named_variable(can_assign)
     }
 
+    fn resolve_upvalue(&mut self) -> Result<Option<u8>, ParseError> {
+        if self.scope_history.is_empty() {
+            return Ok(None);
+        }
+        for (depth, scope) in self.scope_history.iter().enumerate().rev() {
+            for i in (0..scope.locals.len()).rev() {
+                if self.identifier_equal(&self.previous, &scope.locals[i].name) {
+                    return self.add_upvalues(i, depth);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn add_upvalues(&mut self, pos: usize, depth: usize) -> Result<Option<u8>, ParseError> {
+        let mut current = pos as u8;
+        self.scope_history[depth].locals[pos].is_captured = true;
+        if depth + 1 == self.scope_history.len() {
+            Ok(Some(add_upvalue!(self.scope, current, true)))
+        } else {
+            current = add_upvalue!(self.scope_history[depth + 1], current, true);
+            for i in depth + 2..self.scope_history.len() {
+                current = add_upvalue!(self.scope_history[i], current, false);
+            }
+            Ok(Some(add_upvalue!(self.scope, current, false)))
+        }
+    }
+
     fn resolve_local(&mut self) -> Result<Option<u8>, ParseError> {
         for i in (0..self.scope.locals.len()).rev() {
             if self.identifier_equal(&self.previous, &self.scope.locals[i].name) {
@@ -701,16 +768,16 @@ impl Parser {
     }
 
     fn named_variable(&mut self, can_assign: bool) -> Result<(), ParseError> {
-        let arg = self.resolve_local()?;
-        let get_op = if arg.is_none() {
-            OP_GET_GLOBAL
+        let mut arg = self.resolve_local()?;
+        let (get_op, set_op) = if arg.is_some() {
+            (OP_GET_LOCAL, OP_SET_LOCAL)
         } else {
-            OP_GET_LOCAL
-        };
-        let set_op = if arg.is_none() {
-            OP_SET_GLOBAL
-        } else {
-            OP_SET_LOCAL
+            arg = self.resolve_upvalue()?;
+            if arg.is_some() {
+                (OP_GET_UPVALUE, OP_SET_UPVALUE)
+            } else {
+                (OP_GET_GLOBAL, OP_SET_GLOBAL)
+            }
         };
 
         let pos = if let Some(u) = arg {
@@ -905,6 +972,7 @@ impl Parser {
         } else {
             Some(Rc::new(Function {
                 arity: 0,
+                upvalue: 0,
                 chunk: self.chunk.clone(), // Hopefully, remove clone in the future.
                 name: "".to_string(),
             }))
@@ -915,11 +983,19 @@ impl Parser {
 struct Local {
     name: NewToken,
     depth: i32,
+    is_captured: bool,
+}
+
+#[derive(PartialEq)]
+struct Upvalue {
+    index: u8,
+    is_local: bool,
 }
 
 struct Scope {
     pub locals: Vec<Local>,
     pub depth: i32,
+    pub upvalues: Vec<Upvalue>,
 }
 
 impl Scope {
@@ -928,8 +1004,10 @@ impl Scope {
             locals: vec![Local {
                 name: token,
                 depth: 0,
+                is_captured: false,
             }],
             depth: 0,
+            upvalues: Vec::new(),
         }
     }
 }
@@ -1032,5 +1110,54 @@ mod tests {
     #[test]
     fn test_class_without_method() {
         let _ = run("class Pair {}\n var pair = Pair();\npair.first = 1;\npair.second = 2;\nprint pair.first + pair.second;\n");
+    }
+
+    #[test]
+    fn tets_closure1() {
+        let _ = run(r#"fun outer() {
+  var x = "outside";
+  fun inner() {
+    print x;
+  }
+  inner();
+}
+outer();"#);
+    }
+
+    #[test]
+    fn test_closure2() {
+        let _ = run(r#"{
+  var a = 1;
+  fun f() {
+    print a;
+  }
+  var b = 2;
+  fun g() {
+    print b;
+  }
+  var c = 3;
+  fun h() {
+    print c;
+  }
+  f();
+  g();
+  h();
+}
+"#);
+    }
+
+    #[test]
+    fn test_closure3() {
+        let _ = run(r#"fun outer() {
+  var x = "outside";
+  fun inner() {
+    print x;
+  }
+
+  return inner;
+}
+
+var closure = outer();
+closure();"#);
     }
 }

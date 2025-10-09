@@ -11,6 +11,7 @@ pub enum LoxType {
     Number(f64),
     Bool(bool),
     Function(Rc<Function>),
+    Closure(Closure),
     Class(Rc<Class>),
     Instance(Rc<RefCell<Instance>>),
 }
@@ -31,6 +32,14 @@ impl LoxType {
             None
         }
     }
+
+    pub fn as_function(&self) -> Option<Rc<Function>> {
+        if let LoxType::Function(func) = self {
+            Some(func.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for LoxType {
@@ -39,8 +48,9 @@ impl fmt::Display for LoxType {
             LoxType::String(s) => write!(f, "{}", s),
             LoxType::Number(n) => write!(f, "{}", n),
             LoxType::Bool(b) => write!(f, "{}", b),
-            LoxType::Function(l) => write!(f, "{}", l.name),
-            LoxType::Class(l) => write!(f, "{}", l.name),
+            LoxType::Function(fun) => write!(f, "{}", fun.name),
+            LoxType::Closure(c) => write!(f, "{}", c.function.name),
+            LoxType::Class(k) => write!(f, "{}", k.name),
             LoxType::Instance(i) => write!(f, "Instance of {}", i.borrow().klass.name),
             LoxType::None => write!(f, "Nil"),
         }
@@ -66,8 +76,24 @@ impl fmt::Debug for LoxType {
 #[derive(Clone)]
 pub struct Function {
     pub arity: u8,
+    pub upvalue: u8,
     pub chunk: Box<Chunk>,
     pub name: String,
+}
+
+#[derive(Clone)]
+pub struct Closure {
+    pub function: Rc<Function>,
+    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
+}
+
+impl Closure {
+    pub fn new(func: Rc<Function>) -> Closure {
+        Closure {
+            function: func.clone(),
+            upvalues: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -79,6 +105,12 @@ pub struct Class {
 pub struct Instance {
     pub klass: Rc<Class>,
     pub fields: HashMap<String, LoxType>,
+}
+
+#[derive(Clone)]
+pub enum Upvalue {
+    Stack(usize),
+    Out(LoxType),
 }
 
 impl Instance {
